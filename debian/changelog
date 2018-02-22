@@ -1,4 +1,4 @@
-xorg-server (2:1.19.6-1ubuntu2) UNRELEASED; urgency=medium
+xorg-server (2:1.19.6-1ubuntu2) bionic; urgency=medium
 
   * improve-outputclass.diff: Backport commits from upstream to improve
     OutputClass to support options and overriding primary GPU.
@@ -7,7 +7,7 @@ xorg-server (2:1.19.6-1ubuntu2) UNRELEASED; urgency=medium
   * 105_nvidia_autodetect.patch: Dropped, obsolete now.
   * 188_default_primary_to_first_busid.patch: Dropped, obsolete now.
 
- -- Timo Aaltonen <tjaalton@debian.org>  Thu, 15 Feb 2018 15:08:45 +0200
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 22 Feb 2018 15:45:57 +0200
 
 xorg-server (2:1.19.6-1ubuntu1) bionic; urgency=medium
 
