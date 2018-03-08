@@ -1,3 +1,10 @@
+xorg-server (2:1.19.6-1ubuntu3) UNRELEASED; urgency=medium
+
+  * dri2-Sync-i965_pci_ids.h-from-Mesa.patch: Update i965_pci_ids.h to
+    include latest CFL. (LP: #1753954)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 08 Mar 2018 09:27:43 +0200
+
 xorg-server (2:1.19.6-1ubuntu2) bionic; urgency=medium
 
   * improve-outputclass.diff: Backport commits from upstream to improve
