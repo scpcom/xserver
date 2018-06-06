@@ -28,3 +28,4 @@ xwayland-tablet.diff
 improve-outputclass.diff
 dri2-Sync-i965_pci_ids.h-from-Mesa.patch
 server-1.19.diff
+fix-default-permissions.patch

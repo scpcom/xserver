@@ -1,3 +1,10 @@
+xorg-server (2:1.19.6-1ubuntu4) bionic; urgency=medium
+
+  * debian/patches/fix-default-permissions.patch: fix default permissions
+    when creating the log directory. (LP: #1735929)
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Fri, 13 Apr 2018 11:31:45 -0400
+
 xorg-server (2:1.19.6-1ubuntu3) bionic; urgency=medium
 
   * dri2-Sync-i965_pci_ids.h-from-Mesa.patch: Update i965_pci_ids.h to
