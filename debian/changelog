@@ -1,3 +1,10 @@
+xorg-server (2:1.19.6-1ubuntu4.1) UNRELEASED; urgency=medium
+
+  * prime-sync-refactor.diff: Fix crash on modesetting+amdgpu hybrid.
+    (LP: #1789913)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 05 Sep 2018 14:31:56 +0300
+
 xorg-server (2:1.19.6-1ubuntu4) bionic; urgency=medium
 
   * debian/patches/fix-default-permissions.patch: fix default permissions
