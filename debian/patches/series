@@ -30,3 +30,4 @@ dri2-Sync-i965_pci_ids.h-from-Mesa.patch
 server-1.19.diff
 fix-default-permissions.patch
 prime-sync-refactor.diff
+sync-i965-pciids.diff
