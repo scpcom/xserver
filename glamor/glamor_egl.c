@@ -167,9 +167,17 @@ glamor_egl_set_pixmap_bo(PixmapPtr pixmap, struct gbm_bo *bo)
     struct glamor_pixmap_private *pixmap_priv =
         glamor_get_pixmap_private(pixmap);
 
-    if (pixmap_priv->bo && pixmap_priv->owned_bo)
-        gbm_bo_destroy(pixmap_priv->bo);
-
+    if (pixmap_priv->bo) {
+#ifdef GLAMOR_HAS_GBM_MAP
+        if (pixmap_priv->bo_mapped) {
+            gbm_bo_unmap(pixmap_priv->bo, pixmap_priv->map_data);
+            pixmap_priv->bo_mapped = FALSE;
+            pixmap->devPrivate.ptr = NULL;
+        }
+#endif
+        if (pixmap_priv->owned_bo)
+            gbm_bo_destroy(pixmap_priv->bo);
+    }
     pixmap_priv->bo = bo;
     pixmap_priv->owned_bo = TRUE;
 }
@@ -345,9 +353,11 @@ glamor_make_pixmap_exportable(PixmapPtr pixmap)
 
     scratch_gc = GetScratchGC(pixmap->drawable.depth, screen);
     ValidateGC(&pixmap->drawable, scratch_gc);
+    pixmap_priv->exporting = TRUE;
     scratch_gc->ops->CopyArea(&pixmap->drawable, &exported->drawable,
                               scratch_gc,
                               0, 0, width, height, 0, 0);
+    pixmap_priv->exporting = FALSE;
     FreeScratchGC(scratch_gc);
 
     /* Now, swap the tex/gbm/EGLImage/etc. of the exported pixmap into
@@ -487,8 +497,7 @@ glamor_egl_destroy_pixmap(PixmapPtr pixmap)
         struct glamor_pixmap_private *pixmap_priv =
             glamor_get_pixmap_private(pixmap);
 
-        if (pixmap_priv->bo)
-            gbm_bo_destroy(pixmap_priv->bo);
+        glamor_egl_set_pixmap_bo(pixmap, NULL);
     }
 
     screen->DestroyPixmap = glamor_egl->saved_destroy_pixmap;
@@ -531,8 +540,7 @@ glamor_egl_close_screen(ScreenPtr screen)
     screen_pixmap = screen->GetScreenPixmap(screen);
     pixmap_priv = glamor_get_pixmap_private(screen_pixmap);
 
-    gbm_bo_destroy(pixmap_priv->bo);
-    pixmap_priv->bo = NULL;
+    glamor_egl_set_pixmap_bo(screen_pixmap, NULL);
 
     screen->CloseScreen = glamor_egl->saved_close_screen;
 
