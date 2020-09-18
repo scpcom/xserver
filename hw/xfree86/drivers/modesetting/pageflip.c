@@ -313,7 +313,7 @@ ms_do_pageflip_bo(ScreenPtr screen,
     for (i = 0; i < config->num_crtc; i++) {
         xf86CrtcPtr crtc = config->crtc[i];
 
-        if (!ms_crtc_on(crtc))
+        if (!xf86_crtc_on(crtc))
             continue;
 
         if (drmmode_crtc && drmmode_crtc != crtc->driver_private)
