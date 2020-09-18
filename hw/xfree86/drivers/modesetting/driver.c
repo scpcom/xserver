@@ -1841,10 +1841,6 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
                        "Failed to initialize the DRI2 extension.\n");
         }
 
-        if (!(ms->drmmode.present_enable = ms_present_screen_init(pScreen))) {
-            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
-                       "Failed to initialize the Present extension.\n");
-        }
         /* enable reverse prime if we are a GPU screen, and accelerated, and not
          * i915, evdi or udl. i915 is happy scanning out from sysmem.
          * evdi and udl are virtual drivers scanning out from sysmem
@@ -1899,6 +1895,11 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
 #endif
     }
 #endif
+    if (!(ms->drmmode.present_enable = ms_present_screen_init(pScreen))) {
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                   "Failed to initialize the Present extension.\n");
+    }
+
 
     pScrn->vtSema = TRUE;
 
