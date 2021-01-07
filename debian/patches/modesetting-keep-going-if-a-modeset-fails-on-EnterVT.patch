@@ -1,0 +1,155 @@
+From efb3abddd49fb75bd6d0e31046fed43d258c93da Mon Sep 17 00:00:00 2001
+From: Kishore Kadiyala <kishore.kadiyala@intel.com>
+Date: Sat, 19 Sep 2020 01:28:14 +0530
+Subject: [PATCH 2/2] modesetting: keep going if a modeset fails on EnterVT
+
+There was a time when setting a mode on a CRTC would not depend on the
+associated connector's state. If a mode had been set successfully once,
+it would mean it would work later on.
+
+This changed with the introduction of new connectors type that now
+require a link training sequence (DP, HDMI 2.0), and that means that
+some events may have happened while the X server was not master that
+would then prevent the mode from successfully be restored to its
+previous state.
+
+This patch relaxes the requirement that all modes should be restored on
+EnterVT, or the entire X-Server would go down by allowing modesets to
+fail (with some warnings). If a modeset fails, the CRTC will be
+disabled, and a RandR event will be sent for the desktop environment to
+fix the situation as well as possible.
+
+Additional patches might be needed to make sure that the user would
+never be left with all screens black in some scenarios.
+
+v2 (Martin Peres):
+ - whitespace fixes
+ - remove the uevent handling (it is done in a previous patch)
+ - improve the commit message
+ - reduce the size of the patch by not changing lines needlessly
+ - return FALSE if one modeset fails in ignore mode
+ - add comments/todos to explain why we do things
+ - disable the CRTCs that failed the modeset
+
+Signed-off-by: Kishore Kadiyala <kishore.kadiyala@intel.com>
+Signed-off-by: Martin Peres <martin.peres@linux.intel.com>
+Reviewed-by: Daniel Vetter <daniel.vetter@ffwll.ch>
+Tested-by: Kishore Kadiyala <kishore.kadiyala@intel.com>
+Closes: #1010
+---
+ hw/xfree86/drivers/modesetting/driver.c       | 23 +++++++++++++++----
+ .../drivers/modesetting/drmmode_display.c     | 19 +++++++++++----
+ .../drivers/modesetting/drmmode_display.h     |  3 ++-
+ 3 files changed, 36 insertions(+), 9 deletions(-)
+
+diff --git a/hw/xfree86/drivers/modesetting/driver.c b/hw/xfree86/drivers/modesetting/driver.c
+index cf9d3ca12..6549ef8e1 100644
+--- a/hw/xfree86/drivers/modesetting/driver.c
++++ b/hw/xfree86/drivers/modesetting/driver.c
+@@ -712,7 +712,7 @@ msBlockHandler_oneshot(ScreenPtr pScreen, void *pTimeout)
+ 
+     msBlockHandler(pScreen, pTimeout);
+ 
+-    drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE);
++    drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE, FALSE);
+ }
+ 
+ Bool
+@@ -1530,7 +1530,7 @@ CreateScreenResources(ScreenPtr pScreen)
+     ret = pScreen->CreateScreenResources(pScreen);
+     pScreen->CreateScreenResources = CreateScreenResources;
+ 
+-    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, pScrn->is_gpu))
++    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, pScrn->is_gpu, FALSE))
+         return FALSE;
+ 
+     if (!drmmode_glamor_handle_new_screen_pixmap(&ms->drmmode))
+@@ -2016,8 +2016,23 @@ EnterVT(ScrnInfoPtr pScrn)
+ 
+     drmmode_update_kms_state(&ms->drmmode);
+ 
+-    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE))
+-        return FALSE;
++    /* allow not all modes to be set successfully since some events might have
++     * happened while not being master that could prevent the previous
++     * configuration from being re-applied.
++     */
++    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE, TRUE)) {
++        xf86DisableUnusedFunctions(pScrn);
++
++        /* TODO: check that at least one screen is on, to allow the user to fix
++         * their setup if all modeset failed...
++         */
++
++        /* Tell the desktop environment that something changed, so that they
++         * can hopefully correct the situation
++         */
++        RRSetChanged(xf86ScrnToScreen(pScrn));
++        RRTellChanged(xf86ScrnToScreen(pScrn));
++    }
+ 
+     return TRUE;
+ }
+diff --git a/hw/xfree86/drivers/modesetting/drmmode_display.c b/hw/xfree86/drivers/modesetting/drmmode_display.c
+index f4a174e76..d74f62ab6 100644
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.c
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.c
+@@ -3571,9 +3571,11 @@ drmmode_adjust_frame(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int x, int y)
+ }
+ 
+ Bool
+-drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode, Bool set_hw)
++drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode, Bool set_hw,
++                          Bool ign_err)
+ {
+     xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(pScrn);
++    Bool success = TRUE;
+     int c;
+ 
+     for (c = 0; c < config->num_crtc; c++) {
+@@ -3621,8 +3623,17 @@ drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode, Bool set_hw)
+         if (set_hw) {
+             if (!crtc->funcs->
+                 set_mode_major(crtc, &crtc->desiredMode, crtc->desiredRotation,
+-                               crtc->desiredX, crtc->desiredY))
+-                return FALSE;
++                               crtc->desiredX, crtc->desiredY)) {
++                if (!ign_err)
++                    return FALSE;
++                else {
++                    success = FALSE;
++                    crtc->enabled = FALSE;
++                    xf86DrvMsg(pScrn->scrnIndex, X_WARNING,
++                               "Failed to set the desired mode on connector %s\n",
++                               output->name);
++                }
++            }
+         } else {
+             crtc->mode = crtc->desiredMode;
+             crtc->rotation = crtc->desiredRotation;
+@@ -3636,7 +3647,7 @@ drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode, Bool set_hw)
+     /* Validate leases on VT re-entry */
+     drmmode_validate_leases(pScrn);
+ 
+-    return TRUE;
++    return success;
+ }
+ 
+ static void
+diff --git a/hw/xfree86/drivers/modesetting/drmmode_display.h b/hw/xfree86/drivers/modesetting/drmmode_display.h
+index 205d1011f..ce85546bf 100644
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.h
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.h
+@@ -280,7 +280,8 @@ void drmmode_DisableSharedPixmapFlipping(xf86CrtcPtr crtc, drmmode_ptr drmmode);
+ extern Bool drmmode_pre_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int cpp);
+ extern Bool drmmode_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode);
+ void drmmode_adjust_frame(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int x, int y);
+-extern Bool drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode, Bool set_hw);
++extern Bool drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode,
++                                      Bool set_hw, Bool ign_err);
+ extern Bool drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn);
+ 
+ extern void drmmode_update_kms_state(drmmode_ptr drmmode);
+-- 
+2.27.0
+

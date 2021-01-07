@@ -1,0 +1,118 @@
+From 293cf660c95d7ba36510bcc4114d7fd5c5f3801c Mon Sep 17 00:00:00 2001
+From: Martin Peres <martin.peres@linux.intel.com>
+Date: Fri, 24 Apr 2020 18:06:16 +0300
+Subject: [PATCH 1/2] modesetting: check the kms state on EnterVT
+
+Normally, we would receive a uevent coming from Linux's DRM subsystem,
+which would trigger the check for disappearing/appearing resources.
+However, this event is not received when X is not master (another VT
+is selected), and so the userspace / desktop environment would not be
+notified about the changes that happened while X wasn't master.
+
+To fix the issue, this patch forces a refresh on EnterVT by splitting
+the kms-checking code from the uevent handling into its own (exported)
+function called drmmode_update_kms_state. This function is then called
+from both the uevent-handling function, and on EnterVT right before
+restoring the modes.
+
+Signed-off-by: Martin Peres <martin.peres@linux.intel.com>
+Reviewed-by: Daniel Vetter <daniel.vetter@ffwll.ch>
+Acked-by: Kishore Kadiyala <kishore.kadiyala@intel.com>
+Tested-by: Kishore Kadiyala <kishore.kadiyala@intel.com>
+---
+ hw/xfree86/drivers/modesetting/driver.c       |  2 ++
+ .../drivers/modesetting/drmmode_display.c     | 34 ++++++++++++-------
+ .../drivers/modesetting/drmmode_display.h     |  1 +
+ 3 files changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/hw/xfree86/drivers/modesetting/driver.c b/hw/xfree86/drivers/modesetting/driver.c
+index 12e58e4f6..cf9d3ca12 100644
+--- a/hw/xfree86/drivers/modesetting/driver.c
++++ b/hw/xfree86/drivers/modesetting/driver.c
+@@ -2014,6 +2014,8 @@ EnterVT(ScrnInfoPtr pScrn)
+ 
+     SetMaster(pScrn);
+ 
++    drmmode_update_kms_state(&ms->drmmode);
++
+     if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE))
+         return FALSE;
+ 
+diff --git a/hw/xfree86/drivers/modesetting/drmmode_display.c b/hw/xfree86/drivers/modesetting/drmmode_display.c
+index 5dbfa4149..f4a174e76 100644
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.c
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.c
+@@ -3721,30 +3721,19 @@ drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn)
+     return TRUE;
+ }
+ 
+-#ifdef CONFIG_UDEV_KMS
+-
+ #define DRM_MODE_LINK_STATUS_GOOD       0
+ #define DRM_MODE_LINK_STATUS_BAD        1
+ 
+-static void
+-drmmode_handle_uevents(int fd, void *closure)
++void
++drmmode_update_kms_state(drmmode_ptr drmmode)
+ {
+-    drmmode_ptr drmmode = closure;
+     ScrnInfoPtr scrn = drmmode->scrn;
+-    struct udev_device *dev;
+     drmModeResPtr mode_res;
+     xf86CrtcConfigPtr  config = XF86_CRTC_CONFIG_PTR(scrn);
+     int i, j;
+     Bool found = FALSE;
+     Bool changed = FALSE;
+ 
+-    while ((dev = udev_monitor_receive_device(drmmode->uevent_monitor))) {
+-        udev_device_unref(dev);
+-        found = TRUE;
+-    }
+-    if (!found)
+-        return;
+-
+     /* Try to re-set the mode on all the connectors with a BAD link-state:
+      * This may happen if a link degrades and a new modeset is necessary, using
+      * different link-training parameters. If the kernel found that the current
+@@ -3859,6 +3848,25 @@ out:
+ #undef DRM_MODE_LINK_STATUS_BAD
+ #undef DRM_MODE_LINK_STATUS_GOOD
+ 
++#ifdef CONFIG_UDEV_KMS
++
++static void
++drmmode_handle_uevents(int fd, void *closure)
++{
++    drmmode_ptr drmmode = closure;
++    struct udev_device *dev;
++    Bool found = FALSE;
++
++    while ((dev = udev_monitor_receive_device(drmmode->uevent_monitor))) {
++        udev_device_unref(dev);
++        found = TRUE;
++    }
++    if (!found)
++        return;
++
++    drmmode_update_kms_state(drmmode);
++}
++
+ #endif
+ 
+ void
+diff --git a/hw/xfree86/drivers/modesetting/drmmode_display.h b/hw/xfree86/drivers/modesetting/drmmode_display.h
+index 6360dd048..205d1011f 100644
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.h
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.h
+@@ -283,6 +283,7 @@ void drmmode_adjust_frame(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int x, int y);
+ extern Bool drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode, Bool set_hw);
+ extern Bool drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn);
+ 
++extern void drmmode_update_kms_state(drmmode_ptr drmmode);
+ extern void drmmode_uevent_init(ScrnInfoPtr scrn, drmmode_ptr drmmode);
+ extern void drmmode_uevent_fini(ScrnInfoPtr scrn, drmmode_ptr drmmode);
+ 
+-- 
+2.27.0
+
