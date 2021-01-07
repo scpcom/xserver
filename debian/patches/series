@@ -4,7 +4,6 @@
 02_kbsd-input-devd.diff
 03_static-nettle.diff
 05_Revert-Unload-submodules.diff
-06_use-intel-only-on-pre-gen4.diff
 07_use-modesetting-driver-by-default-on-GeForce.diff
 revert-hw-xfree86-avoid-cursor-use-after-free.diff
 revert-disabling-xss-for-rootless-xwayland.diff
@@ -29,9 +28,5 @@ xf86-ignore-conflicting-rr-caps.patch
 xi2-resize-touch.patch
 fix-default-permissions.patch
 reset-transforms-in-closescreen.diff
-dri2-use-va-gl-for-intel.diff
-dri2-set-fallback-names-amd-intel.diff
 randr-auto-bind-of-gpu-is-a-config-change.diff
-modesetting-check-the-kms-state-on-EnterVT.patch
-modesetting-keep-going-if-a-modeset-fails-on-EnterVT.patch
 fix-gtf-detection-for-edid-14.diff
