@@ -22,12 +22,12 @@ no-nv.patch
 228_autobind_gpu.patch
 xf86-ignore-conflicting-rr-caps.patch
 
-xmir.patch
-xi2-resize-touch.patch
-xwayland-tablet.diff
+#xmir.patch
+#xi2-resize-touch.patch
+#xwayland-tablet.diff
 improve-outputclass.diff
-dri2-Sync-i965_pci_ids.h-from-Mesa.patch
+#dri2-Sync-i965_pci_ids.h-from-Mesa.patch
 # server-1.19.diff
 fix-default-permissions.patch
 prime-sync-refactor.diff
-sync-i965-pciids.diff
+#sync-i965-pciids.diff
