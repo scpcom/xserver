@@ -181,12 +181,12 @@ PixmapDirtyDamageDestroy(DamagePtr damage, void *closure)
 }
 
 Bool
-PixmapStartDirtyTracking(PixmapPtr src,
+PixmapStartDirtyTracking(DrawablePtr src,
                          PixmapPtr slave_dst,
                          int x, int y, int dst_x, int dst_y,
                          Rotation rotation)
 {
-    ScreenPtr screen = src->drawable.pScreen;
+    ScreenPtr screen = src->pScreen;
     PixmapDirtyUpdatePtr dirty_update;
     RegionPtr damageregion;
     RegionRec dstregion;
@@ -204,8 +204,7 @@ PixmapStartDirtyTracking(PixmapPtr src,
     dirty_update->dst_y = dst_y;
     dirty_update->rotation = rotation;
     dirty_update->damage = DamageCreate(NULL, PixmapDirtyDamageDestroy,
-                                        DamageReportNone,
-                                        TRUE, src->drawable.pScreen,
+                                        DamageReportNone, TRUE, screen,
                                         dirty_update);
 
     if (rotation != RR_Rotate_0) {
@@ -247,9 +246,9 @@ PixmapStartDirtyTracking(PixmapPtr src,
 }
 
 Bool
-PixmapStopDirtyTracking(PixmapPtr src, PixmapPtr slave_dst)
+PixmapStopDirtyTracking(DrawablePtr src, PixmapPtr slave_dst)
 {
-    ScreenPtr screen = src->drawable.pScreen;
+    ScreenPtr screen = src->pScreen;
     PixmapDirtyUpdatePtr ent, safe;
 
     xorg_list_for_each_entry_safe(ent, safe, &screen->pixmap_dirty_list, ent) {
@@ -301,7 +300,7 @@ PixmapDirtyCompositeRotate(PixmapPtr dst_pixmap,
                            PixmapDirtyUpdatePtr dirty,
                            RegionPtr dirty_region)
 {
-    ScreenPtr pScreen = dirty->src->drawable.pScreen;
+    ScreenPtr pScreen = dirty->src->pScreen;
     PictFormatPtr format = PictureWindowFormat(pScreen->root);
     PicturePtr src, dst;
     XID include_inferiors = IncludeInferiors;
@@ -359,7 +358,7 @@ PixmapDirtyCompositeRotate(PixmapPtr dst_pixmap,
  */
 Bool PixmapSyncDirtyHelper(PixmapDirtyUpdatePtr dirty)
 {
-    ScreenPtr pScreen = dirty->src->drawable.pScreen;
+    ScreenPtr pScreen = dirty->src->pScreen;
     RegionPtr region = DamageRegion(dirty->damage);
     PixmapPtr dst;
     SourceValidateProcPtr SourceValidate;

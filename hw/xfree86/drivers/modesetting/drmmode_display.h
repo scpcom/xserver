@@ -32,16 +32,65 @@
 #include "libudev.h"
 #endif
 
+#include "exa.h"
 #include "dumb_bo.h"
 
 struct gbm_device;
 
+enum drmmode_plane_property {
+    DRMMODE_PLANE_TYPE = 0,
+    DRMMODE_PLANE_FB_ID,
+    DRMMODE_PLANE_CRTC_ID,
+    DRMMODE_PLANE_SRC_X,
+    DRMMODE_PLANE_SRC_Y,
+    DRMMODE_PLANE_SRC_W,
+    DRMMODE_PLANE_SRC_H,
+    DRMMODE_PLANE_CRTC_X,
+    DRMMODE_PLANE_CRTC_Y,
+    DRMMODE_PLANE_CRTC_W,
+    DRMMODE_PLANE_CRTC_H,
+    DRMMODE_PLANE__COUNT
+};
+
+enum drmmode_plane_type {
+    DRMMODE_PLANE_TYPE_PRIMARY = 0,
+    DRMMODE_PLANE_TYPE_CURSOR,
+    DRMMODE_PLANE_TYPE_OVERLAY,
+    DRMMODE_PLANE_TYPE__COUNT
+};
+
+enum drmmode_connector_property {
+    DRMMODE_CONNECTOR_CRTC_ID,
+    DRMMODE_CONNECTOR__COUNT
+};
+
+enum drmmode_crtc_property {
+    DRMMODE_CRTC_ACTIVE,
+    DRMMODE_CRTC_MODE_ID,
+    DRMMODE_CRTC__COUNT
+};
+
 typedef struct {
+    uint32_t width;
+    uint32_t height;
     struct dumb_bo *dumb;
 #ifdef GLAMOR_HAS_GBM
+    Bool used_modifiers;
     struct gbm_bo *gbm;
+    Bool owned_gbm;
 #endif
 } drmmode_bo;
+
+enum drmmode_fb_flip_mode {
+    DRMMODE_FB_FLIP_NONE,
+    DRMMODE_FB_FLIP_TRANSFORMED,
+    DRMMODE_FB_FLIP_ALWAYS
+};
+
+typedef struct {
+    ExaDriverPtr driver;
+    void *priv;
+} drmmode_exa;
 
 typedef struct {
     int fd;
@@ -65,6 +114,8 @@ typedef struct {
     OptionInfoPtr Options;
 
     Bool glamor;
+    drmmode_exa *exa;
+
     Bool shadow_enable;
     Bool shadow_enable2;
     /** Is Option "PageFlip" enabled? */
@@ -72,6 +123,8 @@ typedef struct {
     Bool force_24_32;
     void *shadow_fb;
     void *shadow_fb2;
+
+    enum drmmode_fb_flip_mode fb_flip_mode;
 
     DevPrivateKeyRec pixmapPrivateKeyRec;
 
@@ -81,9 +134,43 @@ typedef struct {
 
     PixmapPtr fbcon_pixmap;
 
+    const char *dri2_device_name;
+
     Bool dri2_flipping;
     Bool present_flipping;
+
+    Bool dri2_enable;
+    Bool present_enable;
 } drmmode_rec, *drmmode_ptr;
+
+typedef struct {
+    const char *name;
+    Bool valid;
+    uint64_t value;
+} drmmode_prop_enum_info_rec, *drmmode_prop_enum_info_ptr;
+
+typedef struct {
+    const char *name;
+    uint32_t prop_id;
+    unsigned int num_enum_values;
+    drmmode_prop_enum_info_rec *enum_values;
+} drmmode_prop_info_rec, *drmmode_prop_info_ptr;
+
+typedef struct {
+    drmModeModeInfo mode_info;
+    uint32_t blob_id;
+    struct xorg_list entry;
+} drmmode_mode_rec, *drmmode_mode_ptr;
+
+typedef struct {
+    drmmode_bo bo;
+    unsigned fb_id;
+
+    PixmapPtr pixmap;
+    DamagePtr damage;
+
+    Bool need_clear;
+} drmmode_fb;
 
 typedef struct {
     drmmode_ptr drmmode;
@@ -96,8 +183,22 @@ typedef struct {
     Bool first_cursor_load_done;
     uint16_t lut_r[256], lut_g[256], lut_b[256];
 
+    drmmode_prop_info_rec props[DRMMODE_CRTC__COUNT];
+    drmmode_prop_info_rec props_plane[DRMMODE_PLANE__COUNT];
+    uint32_t plane_id;
+    drmmode_mode_ptr current_mode;
+
     drmmode_bo rotate_bo;
     unsigned rotate_fb_id;
+
+    /** support fb flipping to avoid tearing */
+    unsigned fb_id;
+    drmmode_fb flip_fb[2];
+    unsigned current_fb;
+    uint64_t flipping_time_ms; /* time of the latest fb flipping */
+    Bool can_flip_fb;
+    Bool flip_fb_enabled;
+    Bool flipping;
 
     PixmapPtr prime_pixmap;
     PixmapPtr prime_pixmap_back;
@@ -110,15 +211,16 @@ typedef struct {
      * lies, and we need to give a reliable 64-bit msc for GL, so we
      * have to track and convert to a userland-tracked 64-bit msc.
      */
-    int32_t vblank_offset;
     uint32_t msc_prev;
     uint64_t msc_high;
     /** @} */
 
     Bool need_modeset;
+    struct xorg_list mode_list;
 
     Bool enable_flipping;
     Bool flipping_active;
+    Bool is_scale;
 } drmmode_crtc_private_rec, *drmmode_crtc_private_ptr;
 
 typedef struct {
@@ -136,10 +238,14 @@ typedef struct {
     drmModePropertyBlobPtr edid_blob;
     drmModePropertyBlobPtr tile_blob;
     int dpms_enum_id;
+    int dpms;
     int num_props;
     drmmode_prop_ptr props;
+    drmmode_prop_info_rec props_connector[DRMMODE_CONNECTOR__COUNT];
     int enc_mask;
     int enc_clone_mask;
+    int possible_crtcs;
+    xf86CrtcPtr current_crtc;
 } drmmode_output_private_rec, *drmmode_output_private_ptr;
 
 typedef struct _msPixmapPriv {
@@ -155,7 +261,7 @@ typedef struct _msPixmapPriv {
     /** Source fields for flipping shared pixmaps */
     Bool defer_dirty_update; /* if we want to manually update */
     PixmapDirtyUpdatePtr dirty; /* cached dirty ent to avoid searching list */
-    PixmapPtr slave_src; /* if we exported shared pixmap, dirty tracking src */
+    DrawablePtr slave_src; /* if we exported shared pixmap, dirty tracking src */
     Bool notify_on_damage; /* if sink has requested damage notification */
 } msPixmapPrivRec, *msPixmapPrivPtr;
 
@@ -165,6 +271,8 @@ extern DevPrivateKeyRec msPixmapPrivateKeyRec;
 
 #define msGetPixmapPriv(drmmode, p) ((msPixmapPrivPtr)dixGetPrivateAddr(&(p)->devPrivates, &(drmmode)->pixmapPrivateKeyRec))
 
+int drmmode_bo_import(drmmode_ptr drmmode, drmmode_bo *bo,
+                      uint32_t *fb_id);
 int drmmode_bo_destroy(drmmode_ptr drmmode, drmmode_bo *bo);
 uint32_t drmmode_bo_get_pitch(drmmode_bo *bo);
 uint32_t drmmode_bo_get_handle(drmmode_bo *bo);
@@ -198,13 +306,15 @@ void drmmode_get_default_bpp(ScrnInfoPtr pScrn, drmmode_ptr drmmmode,
                              int *depth, int *bpp);
 
 void drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode);
-#ifndef DRM_CAP_DUMB_PREFERRED_DEPTH
-#define DRM_CAP_DUMB_PREFERRED_DEPTH 3
-#endif
-#ifndef DRM_CAP_DUMB_PREFER_SHADOW
-#define DRM_CAP_DUMB_PREFER_SHADOW 4
-#endif
 
-#define MS_ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
+int drmmode_crtc_flip(xf86CrtcPtr crtc, uint32_t fb_id, uint32_t flags, void *data);
+
+void drmmode_set_dpms(ScrnInfoPtr scrn, int PowerManagementMode, int flags);
+
+Bool drmmode_flip_fb(xf86CrtcPtr crtc, int *timeout);
+
+PixmapPtr drmmode_create_pixmap_header(ScreenPtr pScreen, int width, int height,
+                                       int depth, int bitsPerPixel, int devKind,
+                                       void *pPixData);
 
 #endif

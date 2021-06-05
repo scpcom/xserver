@@ -49,7 +49,6 @@
 #include "miscstruct.h"
 #include "dixstruct.h"
 #include "shadow.h"
-#include "xf86xv.h"
 #include <X11/extensions/Xv.h>
 #include <xorg-config.h>
 #ifdef XSERVER_PLATFORM_BUS
@@ -80,6 +79,18 @@ static Bool ms_pci_probe(DriverPtr driver,
                          int entity_num, struct pci_device *device,
                          intptr_t match_data);
 static Bool ms_driver_func(ScrnInfoPtr scrn, xorgDriverFuncOp op, void *data);
+
+static int
+ms_shareable_fd_from_pixmap(ScreenPtr screen,
+                            PixmapPtr pixmap,
+                            CARD16 *stride,
+                            CARD32 *size);
+static Bool
+ms_back_pixmap_from_fd(PixmapPtr pixmap,
+                       int fd,
+                       CARD16 width,
+                       CARD16 height,
+                       CARD16 stride, CARD8 depth, CARD8 bpp);
 
 #ifdef XSERVER_LIBPCIACCESS
 static const struct pci_id_match ms_device_match[] = {
@@ -131,6 +142,8 @@ static const OptionInfoRec Options[] = {
     {OPTION_PAGEFLIP, "PageFlip", OPTV_BOOLEAN, {0}, FALSE},
     {OPTION_ZAPHOD_HEADS, "ZaphodHeads", OPTV_STRING, {0}, FALSE},
     {OPTION_DOUBLE_SHADOW, "DoubleShadow", OPTV_BOOLEAN, {0}, FALSE},
+    {OPTION_FLIP_FB, "FlipFB", OPTV_STRING, {0}, FALSE},
+    {OPTION_NO_EDID, "NoEDID", OPTV_BOOLEAN, {0}, FALSE},
     {-1, NULL, OPTV_NONE, {0}, FALSE}
 };
 
@@ -201,12 +214,12 @@ open_hw(const char *dev)
     int fd;
 
     if (dev)
-        fd = open(dev, O_RDWR, 0);
+        fd = open(dev, O_RDWR | O_CLOEXEC, 0);
     else {
         dev = getenv("KMSDEVICE");
-        if ((NULL == dev) || ((fd = open(dev, O_RDWR, 0)) == -1)) {
+        if ((NULL == dev) || ((fd = open(dev, O_RDWR | O_CLOEXEC, 0)) == -1)) {
             dev = "/dev/dri/card0";
-            fd = open(dev, O_RDWR, 0);
+            fd = open(dev, O_RDWR | O_CLOEXEC, 0);
         }
     }
     if (fd == -1)
@@ -228,7 +241,7 @@ check_outputs(int fd, int *count)
         *count = res->count_connectors;
 
     ret = res->count_connectors > 0;
-#if defined DRM_CAP_PRIME && GLAMOR_HAS_GBM_LINEAR
+#if defined(GLAMOR_HAS_GBM_LINEAR)
     if (ret == FALSE) {
         uint64_t value = 0;
         if (drmGetCap(fd, DRM_CAP_PRIME, &value) == 0 &&
@@ -440,6 +453,9 @@ Probe(DriverPtr drv, int flags)
     const char *dev;
     ScrnInfoPtr scrn = NULL;
 
+    if (XSERVER_PLATFORM_BUS || XSERVER_LIBPCIACCESS)
+        return FALSE;
+
     /* For now, just bail out for PROBE_DETECT. */
     if (flags & PROBE_DETECT)
         return FALSE;
@@ -586,7 +602,6 @@ dispatch_slave_dirty(ScreenPtr pScreen)
 static void
 redisplay_dirty(ScreenPtr screen, PixmapDirtyUpdatePtr dirty, int *timeout)
 {
-    modesettingPtr ms = modesettingPTR(xf86ScreenToScrn(screen));
     RegionRec pixregion;
 
     PixmapRegionInit(&pixregion, dirty->slave_dst);
@@ -594,7 +609,8 @@ redisplay_dirty(ScreenPtr screen, PixmapDirtyUpdatePtr dirty, int *timeout)
     PixmapSyncDirtyHelper(dirty);
 
     if (!screen->isGPU) {
-#ifdef GLAMOR
+#ifdef GLAMOR_HAS_GBM
+        modesettingPtr ms = modesettingPTR(xf86ScreenToScrn(screen));
         /*
          * When copying from the master framebuffer to the shared pixmap,
          * we must ensure the copy is complete before the slave starts a
@@ -667,6 +683,9 @@ static void
 msBlockHandler(ScreenPtr pScreen, void *timeout)
 {
     modesettingPtr ms = modesettingPTR(xf86ScreenToScrn(pScreen));
+    ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
+    xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
+    int c;
 
     pScreen->BlockHandler = ms->BlockHandler;
     pScreen->BlockHandler(pScreen, timeout);
@@ -674,8 +693,22 @@ msBlockHandler(ScreenPtr pScreen, void *timeout)
     pScreen->BlockHandler = msBlockHandler;
     if (pScreen->isGPU && !ms->drmmode.reverse_prime_offload_mode)
         dispatch_slave_dirty(pScreen);
-    else if (ms->dirty_enabled)
-        dispatch_dirty(pScreen);
+    else {
+        if (ms->dirty_enabled)
+            dispatch_dirty(pScreen);
+
+        for (c = 0; c < xf86_config->num_crtc; c++) {
+            xf86CrtcPtr crtc = xf86_config->crtc[c];
+            drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
+
+            if (!drmmode_crtc || drmmode_flip_fb(crtc, timeout))
+                continue;
+
+            drmmode_crtc->can_flip_fb = FALSE;
+            drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE);
+            break;
+        }
+    }
 
     ms_dirty_update(pScreen, timeout);
 }
@@ -729,6 +762,20 @@ FreeRec(ScrnInfoPtr pScrn)
 }
 
 static void
+try_enable_exa(ScrnInfoPtr pScrn)
+{
+    modesettingPtr ms = modesettingPTR(pScrn);
+
+    if (xf86LoadSubModule(pScrn, "exa"))
+        ms_init_exa(pScrn);
+
+    if (ms->drmmode.exa)
+        xf86DrvMsg(pScrn->scrnIndex, X_INFO, "exa initialized\n");
+    else
+        xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "exa initialization failed\n");
+}
+
+static void
 try_enable_glamor(ScrnInfoPtr pScrn)
 {
     modesettingPtr ms = modesettingPTR(pScrn);
@@ -739,7 +786,7 @@ try_enable_glamor(ScrnInfoPtr pScrn)
 
     ms->drmmode.glamor = FALSE;
 
-#ifdef GLAMOR
+#ifdef GLAMOR_HAS_GBM
     if (ms->drmmode.force_24_32) {
         xf86DrvMsg(pScrn->scrnIndex, X_CONFIG, "Cannot use glamor with 24bpp packed fb\n");
         return;
@@ -775,11 +822,12 @@ msShouldDoubleShadow(ScrnInfoPtr pScrn, modesettingPtr ms)
 {
     Bool ret = FALSE, asked;
     int from;
-    drmVersionPtr v = drmGetVersion(ms->fd);
+    drmVersionPtr v;
 
     if (!ms->drmmode.shadow_enable)
         return FALSE;
 
+    v = drmGetVersion(ms->fd);
     if (!strcmp(v->name, "mgag200") ||
         !strcmp(v->name, "ast")) /* XXX || rn50 */
         ret = TRUE;
@@ -798,14 +846,6 @@ msShouldDoubleShadow(ScrnInfoPtr pScrn, modesettingPtr ms)
 
     return ret;
 }
-
-#ifndef DRM_CAP_CURSOR_WIDTH
-#define DRM_CAP_CURSOR_WIDTH 0x8
-#endif
-
-#ifndef DRM_CAP_CURSOR_HEIGHT
-#define DRM_CAP_CURSOR_HEIGHT 0x9
-#endif
 
 static Bool
 ms_get_drm_master_fd(ScrnInfoPtr pScrn)
@@ -883,6 +923,7 @@ PreInit(ScrnInfoPtr pScrn, int flags)
     modesettingPtr ms;
     rgb defaultWeight = { 0, 0, 0 };
     EntityInfoPtr pEnt;
+    const char *str_value;
     uint64_t value = 0;
     int ret;
     int bppflags, connector_count;
@@ -933,7 +974,7 @@ PreInit(ScrnInfoPtr pScrn, int flags)
                    "Using 24bpp hw front buffer with 32bpp shadow\n");
         defaultbpp = 32;
     } else {
-        ms->drmmode.kbpp = defaultbpp;
+        ms->drmmode.kbpp = 0;
     }
     bppflags = PreferConvert24to32 | SupportConvert24to32 | Support32bppFb;
 
@@ -945,6 +986,7 @@ PreInit(ScrnInfoPtr pScrn, int flags)
     case 15:
     case 16:
     case 24:
+    case 30:
         break;
     default:
         xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
@@ -953,6 +995,8 @@ PreInit(ScrnInfoPtr pScrn, int flags)
         return FALSE;
     }
     xf86PrintDepthBpp(pScrn);
+    if (!ms->drmmode.kbpp)
+        ms->drmmode.kbpp = pScrn->bitsPerPixel;
 
     /* Process the options */
     xf86CollectOptions(pScrn, NULL);
@@ -1012,8 +1056,21 @@ PreInit(ScrnInfoPtr pScrn, int flags)
     ms->drmmode.pageflip =
         xf86ReturnOptValBool(ms->drmmode.Options, OPTION_PAGEFLIP, TRUE);
 
+    str_value = xf86GetOptValString(ms->drmmode.Options, OPTION_FLIP_FB);
+    if (!str_value || !strcmp(str_value, "transformed"))
+        ms->drmmode.fb_flip_mode = DRMMODE_FB_FLIP_TRANSFORMED;
+    else if (!strcmp(str_value, "always"))
+        ms->drmmode.fb_flip_mode = DRMMODE_FB_FLIP_ALWAYS;
+    else
+        ms->drmmode.fb_flip_mode = DRMMODE_FB_FLIP_NONE;
+
+    if (ms->drmmode.fb_flip_mode != DRMMODE_FB_FLIP_NONE)
+        xf86DrvMsg(pScrn->scrnIndex, X_INFO,
+                   "FlipFB: %s\n",
+                   (ms->drmmode.fb_flip_mode == DRMMODE_FB_FLIP_ALWAYS ?
+                    "Always" : "Transformed"));
+
     pScrn->capabilities = 0;
-#ifdef DRM_CAP_PRIME
     ret = drmGetCap(ms->fd, DRM_CAP_PRIME, &value);
     if (ret == 0) {
         if (connector_count && (value & DRM_PRIME_CAP_IMPORT)) {
@@ -1026,7 +1083,14 @@ PreInit(ScrnInfoPtr pScrn, int flags)
             pScrn->capabilities |= RR_Capability_SourceOutput | RR_Capability_SourceOffload;
 #endif
     }
-#endif
+
+    ret = drmSetClientCap(ms->fd, DRM_CLIENT_CAP_ATOMIC, 1);
+    ms->atomic_modeset = (ret == 0);
+
+    ms->kms_has_modifiers = FALSE;
+    ret = drmGetCap(ms->fd, DRM_CAP_ADDFB2_MODIFIERS, &value);
+    if (ret == 0 && value != 0)
+        ms->kms_has_modifiers = TRUE;
 
     if (drmmode_pre_init(pScrn, &ms->drmmode, pScrn->bitsPerPixel / 8) == FALSE) {
         xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "KMS setup failed\n");
@@ -1166,10 +1230,12 @@ msUpdatePacked(ScreenPtr pScreen, shadowBufPtr pBuf)
         free(prect);
     } while (0);
 
+    ms_exa_prepare_access(pBuf->pPixmap, 0);
     if (use_ms_shadow)
         ms_shadowUpdate32to24(pScreen, pBuf);
     else
         shadowUpdatePacked(pScreen, pBuf);
+    ms_exa_finish_access(pBuf->pPixmap, 0);
 }
 
 static Bool
@@ -1227,12 +1293,12 @@ msDisableSharedPixmapFlipping(RRCrtcPtr crtc)
 }
 
 static Bool
-msStartFlippingPixmapTracking(RRCrtcPtr crtc, PixmapPtr src,
+msStartFlippingPixmapTracking(RRCrtcPtr crtc, DrawablePtr src,
                               PixmapPtr slave_dst1, PixmapPtr slave_dst2,
                               int x, int y, int dst_x, int dst_y,
                               Rotation rotation)
 {
-    ScreenPtr pScreen = src->drawable.pScreen;
+    ScreenPtr pScreen = src->pScreen;
     modesettingPtr ms = modesettingPTR(xf86ScreenToScrn(pScreen));
 
     msPixmapPrivPtr ppriv1 = msGetPixmapPriv(&ms->drmmode, slave_dst1),
@@ -1272,7 +1338,7 @@ msPresentSharedPixmap(PixmapPtr slave_dst)
     RegionPtr region = DamageRegion(ppriv->dirty->damage);
 
     if (RegionNotEmpty(region)) {
-        redisplay_dirty(ppriv->slave_src->drawable.pScreen, ppriv->dirty, NULL);
+        redisplay_dirty(ppriv->slave_src->pScreen, ppriv->dirty, NULL);
         DamageEmpty(ppriv->dirty->damage);
 
         return TRUE;
@@ -1282,10 +1348,10 @@ msPresentSharedPixmap(PixmapPtr slave_dst)
 }
 
 static Bool
-msStopFlippingPixmapTracking(PixmapPtr src,
+msStopFlippingPixmapTracking(DrawablePtr src,
                              PixmapPtr slave_dst1, PixmapPtr slave_dst2)
 {
-    ScreenPtr pScreen = src->drawable.pScreen;
+    ScreenPtr pScreen = src->pScreen;
     modesettingPtr ms = modesettingPTR(xf86ScreenToScrn(pScreen));
 
     msPixmapPrivPtr ppriv1 = msGetPixmapPriv(&ms->drmmode, slave_dst1),
@@ -1340,6 +1406,8 @@ CreateScreenResources(ScreenPtr pScreen)
         pixels = drmmode_map_front_bo(&ms->drmmode);
         if (!pixels)
             return FALSE;
+
+        drmmode_glamor_handle_new_screen_pixmap(&ms->drmmode);
     }
 
     rootPixmap = pScreen->GetScreenPixmap(pScreen);
@@ -1400,25 +1468,21 @@ msShadowInit(ScreenPtr pScreen)
 static Bool
 msSharePixmapBacking(PixmapPtr ppix, ScreenPtr screen, void **handle)
 {
-#ifdef GLAMOR_HAS_GBM
-    int ret;
+    int ret = -1;
     CARD16 stride;
     CARD32 size;
-    ret = glamor_shareable_fd_from_pixmap(ppix->drawable.pScreen, ppix,
-                                          &stride, &size);
+    ret = ms_shareable_fd_from_pixmap(ppix->drawable.pScreen, ppix,
+                                      &stride, &size);
     if (ret == -1)
         return FALSE;
 
     *handle = (void *)(long)(ret);
     return TRUE;
-#endif
-    return FALSE;
 }
 
 static Bool
 msSetSharedPixmapBacking(PixmapPtr ppix, void *fd_handle)
 {
-#ifdef GLAMOR
     ScreenPtr screen = ppix->drawable.pScreen;
     ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
     modesettingPtr ms = modesettingPTR(scrn);
@@ -1430,11 +1494,11 @@ msSetSharedPixmapBacking(PixmapPtr ppix, void *fd_handle)
            return drmmode_SetSlaveBO(ppix, &ms->drmmode, ihandle, 0, 0);
 
     if (ms->drmmode.reverse_prime_offload_mode) {
-        ret = glamor_back_pixmap_from_fd(ppix, ihandle,
-                                         ppix->drawable.width,
-                                         ppix->drawable.height,
-                                         ppix->devKind, ppix->drawable.depth,
-                                         ppix->drawable.bitsPerPixel);
+        ret = ms_back_pixmap_from_fd(ppix, ihandle,
+                                     ppix->drawable.width,
+                                     ppix->drawable.height,
+                                     ppix->devKind, ppix->drawable.depth,
+                                     ppix->drawable.bitsPerPixel);
     } else {
         int size = ppix->devKind * ppix->drawable.height;
         ret = drmmode_SetSlaveBO(ppix, &ms->drmmode, ihandle, ppix->devKind, size);
@@ -1443,9 +1507,6 @@ msSetSharedPixmapBacking(PixmapPtr ppix, void *fd_handle)
         return ret;
 
     return TRUE;
-#else
-    return FALSE;
-#endif
 }
 
 static Bool
@@ -1540,6 +1601,7 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
     ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
     modesettingPtr ms = modesettingPTR(pScrn);
     VisualPtr visual;
+    const char *str_value;
 
     pScrn->pScreen = pScreen;
 
@@ -1607,7 +1669,7 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     fbPictureInit(pScreen, NULL, 0);
 
-#ifdef GLAMOR
+#ifdef GLAMOR_HAS_GBM
     if (ms->drmmode.glamor) {
         if (!glamor_init(pScreen, GLAMOR_USE_EGL_SCREEN)) {
             xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
@@ -1627,6 +1689,11 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
 
     xf86SetBlackWhitePixels(pScreen);
 
+    str_value = xf86GetOptValString(ms->drmmode.Options,
+                                    OPTION_ACCEL_METHOD);
+    if (str_value && !strcmp(str_value, "exa"))
+        try_enable_exa(pScrn);
+
     xf86SetBackingStore(pScreen);
     xf86SetSilkenMouse(pScreen);
     miDCInitialize(pScreen, xf86GetPointerScreenFuncs());
@@ -1642,7 +1709,7 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
      * later memory should be bound when allocating, e.g rotate_mem */
     pScrn->vtSema = TRUE;
 
-    if (serverGeneration == 1 && bgNoneRoot && ms->drmmode.glamor) {
+    if (serverGeneration == 1 && bgNoneRoot) {
         ms->CreateWindow = pScreen->CreateWindow;
         pScreen->CreateWindow = CreateWindow_oneshot;
     }
@@ -1669,23 +1736,35 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
     if (!xf86CrtcScreenInit(pScreen))
         return FALSE;
 
-    if (!miCreateDefColormap(pScreen))
+    if (!drmmode_setup_colormap(pScreen, pScrn))
         return FALSE;
 
-    xf86DPMSInit(pScreen, xf86DPMSSet, 0);
+    if (ms->atomic_modeset)
+        xf86DPMSInit(pScreen, drmmode_set_dpms, 0);
+    else
+        xf86DPMSInit(pScreen, xf86DPMSSet, 0);
 
-#ifdef GLAMOR
+#ifdef GLAMOR_HAS_GBM
     if (ms->drmmode.glamor) {
-        XF86VideoAdaptorPtr     glamor_adaptor;
-
-        glamor_adaptor = glamor_xv_init(pScreen, 16);
-        if (glamor_adaptor != NULL)
-            xf86XVScreenInit(pScreen, &glamor_adaptor, 1);
-        else
+        ms->adaptor = glamor_xv_init(pScreen, 16);
+        if (ms->adaptor != NULL) {
+            xf86XVScreenInit(pScreen, &ms->adaptor, 1);
+        } else {
             xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
                        "Failed to initialize XV support.\n");
+        }
     }
 #endif
+
+    if (ms->drmmode.exa) {
+        ms->adaptor = ms_exa_xv_init(pScreen, 16);
+        if (ms->adaptor != NULL) {
+            xf86XVScreenInit(pScreen, &ms->adaptor, 1);
+        } else {
+            xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
+                       "Failed to initialize XV support.\n");
+        }
+    }
 
     if (serverGeneration == 1)
         xf86ShowUnusedOptions(pScrn->scrnIndex, pScrn->options);
@@ -1696,14 +1775,13 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
         return FALSE;
     }
 
-#ifdef GLAMOR
-    if (ms->drmmode.glamor) {
-        if (!ms_dri2_screen_init(pScreen)) {
+    if (ms->drmmode.glamor || ms->drmmode.exa) {
+        if (!(ms->drmmode.dri2_enable = ms_dri2_screen_init(pScreen))) {
             xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
                        "Failed to initialize the DRI2 extension.\n");
         }
 
-        if (!ms_present_screen_init(pScreen)) {
+        if (!(ms->drmmode.present_enable = ms_present_screen_init(pScreen))) {
             xf86DrvMsg(pScrn->scrnIndex, X_ERROR,
                        "Failed to initialize the Present extension.\n");
         }
@@ -1724,7 +1802,6 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
             }
         }
     }
-#endif
 
     pScrn->vtSema = TRUE;
 
@@ -1794,14 +1871,21 @@ CloseScreen(ScreenPtr pScreen)
     modesettingPtr ms = modesettingPTR(pScrn);
     modesettingEntPtr ms_ent = ms_ent_priv(pScrn);
 
+    xf86CrtcConfigPtr xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
+    int c;
+
+    /* HACK: All filters would be reset after screen closed */
+    for (c = 0; c < xf86_config->num_crtc; c++) {
+        xf86CrtcPtr crtc = xf86_config->crtc[c];
+        crtc->transform.filter = NULL;
+    }
+
     /* Clear mask of assigned crtc's in this generation */
     ms_ent->assigned_crtcs = 0;
 
-#ifdef GLAMOR
-    if (ms->drmmode.glamor) {
+    if (ms->drmmode.dri2_enable) {
         ms_dri2_close_screen(pScreen);
     }
-#endif
 
     ms_vblank_close_screen(pScreen);
 
@@ -1822,12 +1906,22 @@ CloseScreen(ScreenPtr pScreen)
 
     drmmode_free_bos(pScrn, &ms->drmmode);
 
+    if (ms->adaptor) {
+        free(ms->adaptor);
+        ms->adaptor = NULL;
+    }
+
     if (pScrn->vtSema) {
         LeaveVT(pScrn);
     }
 
+    if (ms->drmmode.exa)
+        ms_deinit_exa(pScrn);
+
     pScreen->CreateScreenResources = ms->createScreenResources;
     pScreen->BlockHandler = ms->BlockHandler;
+
+    xf86_cursors_fini(pScreen);
 
     pScrn->vtSema = FALSE;
     pScreen->CloseScreen = ms->CloseScreen;
@@ -1838,4 +1932,93 @@ static ModeStatus
 ValidMode(ScrnInfoPtr arg, DisplayModePtr mode, Bool verbose, int flags)
 {
     return MODE_OK;
+}
+
+void
+ms_exchange_buffers(PixmapPtr front, PixmapPtr back)
+{
+    ScreenPtr screen = front->drawable.pScreen;
+    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+    modesettingPtr ms = modesettingPTR(scrn);
+
+#ifdef GLAMOR_HAS_GBM
+    if (ms->drmmode.glamor)
+        return glamor_egl_exchange_buffers(front, back);
+#endif
+
+    if (ms->drmmode.exa)
+        return ms_exa_exchange_buffers(front, back);
+}
+
+static Bool
+ms_back_pixmap_from_fd(PixmapPtr pixmap,
+                       int fd,
+                       CARD16 width,
+                       CARD16 height,
+                       CARD16 stride, CARD8 depth, CARD8 bpp)
+{
+    ScreenPtr screen = pixmap->drawable.pScreen;
+    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+    modesettingPtr ms = modesettingPTR(scrn);
+
+#ifdef GLAMOR_HAS_GBM
+    if (ms->drmmode.glamor)
+        return glamor_back_pixmap_from_fd(pixmap, fd,
+                                          width, height,
+                                          stride, depth, bpp);
+#endif
+
+    if (ms->drmmode.exa)
+        return ms_exa_back_pixmap_from_fd(pixmap, fd,
+                                          width, height,
+                                          stride, depth, bpp);
+
+    return FALSE;
+}
+
+static int
+ms_shareable_fd_from_pixmap(ScreenPtr screen,
+                            PixmapPtr pixmap,
+                            CARD16 *stride,
+                            CARD32 *size)
+{
+    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+    modesettingPtr ms = modesettingPTR(scrn);
+
+#ifdef GLAMOR_HAS_GBM
+    if (ms->drmmode.glamor)
+        return glamor_shareable_fd_from_pixmap(screen, pixmap, stride, size);
+#endif
+
+    if (ms->drmmode.exa)
+        return ms_exa_shareable_fd_from_pixmap(screen, pixmap, stride, size);
+
+    return -1;
+}
+
+int
+ms_name_from_pixmap(PixmapPtr pixmap,
+                    CARD16 *stride, CARD32 *size)
+{
+    ScreenPtr screen = pixmap->drawable.pScreen;
+    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+    modesettingPtr ms = modesettingPTR(scrn);
+    struct dumb_bo *bo;
+
+#ifdef GLAMOR_HAS_GBM
+    if (ms->drmmode.glamor)
+        return glamor_name_from_pixmap(pixmap, stride, size);
+#endif
+
+    if (!ms->drmmode.exa)
+        return -1;
+
+    bo = ms_exa_bo_from_pixmap(screen, pixmap);
+    if (!bo)
+        return -1;
+
+    *stride = bo->pitch;
+    *size = bo->size;
+
+    return dumb_bo_get_name(ms->drmmode.fd, bo);
 }

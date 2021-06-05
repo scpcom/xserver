@@ -30,19 +30,17 @@
 #include <errno.h>
 #include <drm.h>
 #include <xf86drm.h>
+#include <xf86xv.h>
 #include <xf86Crtc.h>
 #include <damage.h>
 
-#ifdef GLAMOR
+#ifdef GLAMOR_HAS_GBM
 #define GLAMOR_FOR_XORG 1
 #include "glamor.h"
-#ifdef GLAMOR_HAS_GBM
 #include <gbm.h>
-#endif
 #endif
 
 #include "drmmode_display.h"
-#define DRV_ERROR(msg)	xf86DrvMsg(pScrn->scrnIndex, X_ERROR, msg);
 #define MS_LOGLEVEL_DEBUG 4
 
 typedef enum {
@@ -53,6 +51,8 @@ typedef enum {
     OPTION_PAGEFLIP,
     OPTION_ZAPHOD_HEADS,
     OPTION_DOUBLE_SHADOW,
+    OPTION_FLIP_FB,
+    OPTION_NO_EDID,
 } modesettingOpts;
 
 typedef struct
@@ -113,12 +113,21 @@ typedef struct _modesettingRec {
      * Page flipping stuff.
      *  @{
      */
+    Bool atomic_modeset;
+    Bool pending_modeset;
     /** @} */
 
     DamagePtr damage;
     Bool dirty_enabled;
 
     uint32_t cursor_width, cursor_height;
+
+    Bool has_queue_sequence;
+    Bool tried_queue_sequence;
+
+    Bool kms_has_modifiers;
+
+    XF86VideoAdaptorPtr adaptor;
 } modesettingRec, *modesettingPtr;
 
 #define modesettingPTR(p) ((modesettingPtr)((p)->driverPrivate))
@@ -128,6 +137,15 @@ uint32_t ms_drm_queue_alloc(xf86CrtcPtr crtc,
                             void *data,
                             ms_drm_handler_proc handler,
                             ms_drm_abort_proc abort);
+
+typedef enum ms_queue_flag {
+    MS_QUEUE_ABSOLUTE = 0,
+    MS_QUEUE_RELATIVE = 1,
+    MS_QUEUE_NEXT_ON_MISS = 2
+} ms_queue_flag;
+
+Bool ms_queue_vblank(xf86CrtcPtr crtc, ms_queue_flag flags,
+                     uint64_t msc, uint64_t *msc_queued, uint32_t seq);
 
 void ms_drm_abort(ScrnInfoPtr scrn,
                   Bool (*match)(void *data, void *match_data),
@@ -140,8 +158,7 @@ xf86CrtcPtr ms_dri2_crtc_covering_drawable(DrawablePtr pDraw);
 
 int ms_get_crtc_ust_msc(xf86CrtcPtr crtc, CARD64 *ust, CARD64 *msc);
 
-uint32_t ms_crtc_msc_to_kernel_msc(xf86CrtcPtr crtc, uint64_t expect);
-uint64_t ms_kernel_msc_to_crtc_msc(xf86CrtcPtr crtc, uint32_t sequence);
+uint64_t ms_kernel_msc_to_crtc_msc(xf86CrtcPtr crtc, uint64_t sequence, Bool is64bit);
 
 
 Bool ms_dri2_screen_init(ScreenPtr screen);
@@ -152,14 +169,20 @@ void ms_vblank_close_screen(ScreenPtr screen);
 
 Bool ms_present_screen_init(ScreenPtr screen);
 
-#ifdef GLAMOR
-
 typedef void (*ms_pageflip_handler_proc)(modesettingPtr ms,
                                          uint64_t frame,
                                          uint64_t usec,
                                          void *data);
 
 typedef void (*ms_pageflip_abort_proc)(modesettingPtr ms, void *data);
+
+Bool ms_do_pageflip_bo(ScreenPtr screen,
+                       drmmode_bo *new_front_bo,
+                       void *event,
+                       int ref_crtc_vblank_pipe,
+                       Bool async,
+                       ms_pageflip_handler_proc pageflip_handler,
+                       ms_pageflip_abort_proc pageflip_abort);
 
 Bool ms_do_pageflip(ScreenPtr screen,
                     PixmapPtr new_front,
@@ -169,6 +192,27 @@ Bool ms_do_pageflip(ScreenPtr screen,
                     ms_pageflip_handler_proc pageflip_handler,
                     ms_pageflip_abort_proc pageflip_abort);
 
-#endif
-
 int ms_flush_drm_events(ScreenPtr screen);
+
+Bool ms_init_exa(ScrnInfoPtr scrn);
+void ms_deinit_exa(ScrnInfoPtr scrn);
+Bool ms_exa_set_pixmap_bo(ScrnInfoPtr scrn, PixmapPtr pPixmap,
+                          struct dumb_bo *bo, Bool owned);
+struct dumb_bo *ms_exa_bo_from_pixmap(ScreenPtr screen, PixmapPtr pixmap);
+void ms_exa_exchange_buffers(PixmapPtr front, PixmapPtr back);
+Bool ms_exa_back_pixmap_from_fd(PixmapPtr pixmap, int fd,
+                                CARD16 width, CARD16 height,
+                                CARD16 stride, CARD8 depth, CARD8 bpp);
+int ms_exa_shareable_fd_from_pixmap(ScreenPtr screen, PixmapPtr pixmap,
+                                    CARD16 *stride, CARD32 *size);
+
+Bool ms_exa_prepare_access(PixmapPtr pPix, int index);
+void ms_exa_finish_access(PixmapPtr pPix, int index);
+
+Bool ms_exa_copy_area(PixmapPtr pSrc, PixmapPtr pDst,
+                      pixman_f_transform_t *transform, RegionPtr clip);
+
+XF86VideoAdaptorPtr ms_exa_xv_init(ScreenPtr screen, int num_texture_ports);
+
+void ms_exchange_buffers(PixmapPtr front, PixmapPtr back);
+int ms_name_from_pixmap(PixmapPtr pixmap, CARD16 *stride, CARD32 *size);

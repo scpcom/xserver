@@ -103,15 +103,9 @@ extern _X_EXPORT void glamor_fini(ScreenPtr screen);
  * Otherwise, the glamor internal structure will not be freed.*/
 extern _X_EXPORT Bool glamor_close_screen(ScreenPtr screen);
 
-/* Let glamor to know the screen's fbo. The low level
- * driver should already assign a tex
- * to this pixmap through the set_pixmap_texture. */
-extern _X_EXPORT void glamor_set_screen_pixmap(PixmapPtr screen_pixmap,
-                                               PixmapPtr *back_pixmap);
-
 extern _X_EXPORT uint32_t glamor_get_pixmap_texture(PixmapPtr pixmap);
 
-extern _X_EXPORT void glamor_set_pixmap_texture(PixmapPtr pixmap,
+extern _X_EXPORT Bool glamor_set_pixmap_texture(PixmapPtr pixmap,
                                                 unsigned int tex);
 
 extern _X_EXPORT void glamor_set_pixmap_type(PixmapPtr pixmap,
@@ -127,6 +121,7 @@ extern _X_EXPORT Bool glamor_destroy_pixmap(PixmapPtr pixmap);
 #define GLAMOR_CREATE_FBO_NO_FBO        0x103
 #define GLAMOR_CREATE_NO_LARGE          0x105
 #define GLAMOR_CREATE_PIXMAP_NO_TEXTURE 0x106
+#define GLAMOR_CREATE_FORMAT_CBCR       0x107
 
 /* @glamor_egl_exchange_buffers: Exchange the underlying buffers(KHR image,fbo).
  *
@@ -161,8 +156,7 @@ extern _X_EXPORT struct gbm_device *glamor_egl_get_gbm_device(ScreenPtr screen);
  *
  * The EGL layer needs to have the following extensions working:
  *
- * .EGL_KHR_gl_texture_2D_image
- * .EGL_EXT_image_dma_buf_import
+ * .EGL_KHR_surfaceless_context
  * */
 extern _X_EXPORT Bool glamor_supports_pixmap_import_export(ScreenPtr screen);
 
@@ -299,17 +293,11 @@ extern _X_EXPORT Bool glamor_egl_init_textured_pixmap(ScreenPtr screen);
 extern _X_EXPORT Bool glamor_egl_create_textured_screen(ScreenPtr screen,
                                                         int handle, int stride);
 
-/* @glamor_egl_create_textured_screen_ext:
- *
- * extent one parameter to track the pointer of the DDX layer's back pixmap.
- * We need this pointer during the closing screen stage. As before back to
- * the DDX's close screen, we have to free all the glamor related resources.
+/* Obsolete entrypoint, temporarily left here for API compatibility
+ * for xf86-video-ati.
  */
-extern _X_EXPORT Bool glamor_egl_create_textured_screen_ext(ScreenPtr screen,
-                                                            int handle,
-                                                            int stride,
-                                                            PixmapPtr
-                                                            *back_pixmap);
+#define glamor_egl_create_textured_screen_ext(a, b, c, d) \
+    glamor_egl_create_textured_screen(a, b, c)
 
 /*
  * @glamor_egl_create_textured_pixmap: Try to create a textured pixmap from
@@ -357,6 +345,7 @@ extern Bool _X_EXPORT glamor_change_window_attributes(WindowPtr pWin, unsigned l
 extern void _X_EXPORT glamor_copy_window(WindowPtr window, DDXPointRec old_origin, RegionPtr src_region);
 
 extern _X_EXPORT void glamor_finish(ScreenPtr screen);
+extern _X_EXPORT void glamor_pixmap_invalid(PixmapPtr pixmap);
 #define HAS_GLAMOR_TEXT 1
 
 #ifdef GLAMOR_FOR_XORG

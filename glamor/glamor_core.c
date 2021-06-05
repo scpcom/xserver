@@ -40,12 +40,9 @@ glamor_get_drawable_location(const DrawablePtr drawable)
 {
     PixmapPtr pixmap = glamor_get_drawable_pixmap(drawable);
     glamor_pixmap_private *pixmap_priv = glamor_get_pixmap_private(pixmap);
-    glamor_screen_private *glamor_priv =
-        glamor_get_screen_private(drawable->pScreen);
+
     if (pixmap_priv->gl_fbo == GLAMOR_FBO_UNATTACHED)
         return 'm';
-    if (pixmap_priv->fbo->fb == glamor_priv->screen_fbo)
-        return 's';
     else
         return 'f';
 }
@@ -113,6 +110,33 @@ glamor_link_glsl_prog(ScreenPtr screen, GLint prog, const char *format, ...)
     }
 }
 
+#ifdef GLAMOR_HAS_GBM_MAP
+Bool
+glamor_prefer_gl(const char *func) {
+    if (!strcmp(func, "glamor_copy") ||
+        !strcmp(func, "glamor_composite") ||
+        !strcmp(func, "glamor_poly_segment") ||
+        !strcmp(func, "glamor_push_pixels") ||
+        !strcmp(func, "glamor_poly_fill_rect") ||
+        !strcmp(func, "glamor_poly_glyph_blt"))
+        return TRUE;
+
+    /*
+    if (!strcmp(func, "glamor_poly_lines") ||
+       !strcmp(func, "glamor_poly_point") ||
+       !strcmp(func, "glamor_put_image") ||
+       !strcmp(func, "glamor_get_image") ||
+       !strcmp(func, "glamor_fill_spans") ||
+       !strcmp(func, "glamor_get_spans") ||
+       !strcmp(func, "glamor_set_spans"))
+        return FALSE;
+        */
+
+    return FALSE;
+}
+#else
+Bool glamor_prefer_gl(const char *func) { return TRUE; }
+#endif
 
 static GCOps glamor_gc_ops = {
     .FillSpans = glamor_fill_spans,
