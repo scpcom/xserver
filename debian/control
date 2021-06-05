@@ -338,26 +338,6 @@ Replaces: xserver-xorg-core (<< 2:1.5.2)
 Description: common files used by various X servers
  This package provides files necessary for all X.Org based X servers.
 
-Package: xmir
-Architecture: amd64 arm64 armhf i386
-Depends:
- xserver-common (>= ${source:Version}),
- ${shlibs:Depends},
- ${misc:Depends},
-Description: Xmir X server
- This package provides an X server running on top of Mir, using Mir
- input devices for input and forwarding either the root window or individual
- top-level windows as wayland surfaces.
-
-Package: xserver-xorg-xmir
-Architecture: all
-Depends: ${shlibs:Depends},
-         ${misc:Depends},
-         xmir,
-Description: Xmir X server (transitional package)
- This is a transitional package to ease upgrades to xmir.
- It can be safely removed.
-
 Package: xorg-server-source
 Architecture: all
 Depends:
