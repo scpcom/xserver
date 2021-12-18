@@ -1,3 +1,12 @@
+xorg-server (2:1.20.4-1+deb10u4) buster-security; urgency=high
+
+  * record: Fix out of bounds access in SwapCreateRegister() [CVE-2021-4011]
+  * xfixes: Fix out of bounds access in *ProcXFixesCreatePointerBarrier() [CVE-2021-4009]
+  * Xext: Fix out of bounds access in SProcScreenSaverSuspend() [CVE-2021-4010]
+  * render: Fix out of bounds access in SProcRenderCompositeGlyphs() [CVE-2021-4008]
+
+ -- Julien Cristau <jcristau@debian.org>  Sat, 18 Dec 2021 10:05:36 +0100
+
 xorg-server (2:1.20.4-1+deb10u3) buster-security; urgency=high
 
   * Fix XChangeFeedbackControl() request underflow (CVE-2021-3472)

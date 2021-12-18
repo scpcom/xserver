@@ -11,3 +11,7 @@
 10_Fix-XIChangeHierarchy-integer-underflow.patch
 11_Fix-XkbSelectEvents-integer-underflow.patch
 12_Fix-XRecordRegisterClients-Integer-underflow.patch
+13_record-Fix-out-of-bounds-access-in-SwapCreateRegiste.patch
+14_xfixes-Fix-out-of-bounds-access-in-ProcXFixesCreateP.patch
+15_Xext-Fix-out-of-bounds-access-in-SProcScreenSaverSus.patch
+16_render-Fix-out-of-bounds-access-in-SProcRenderCompos.patch
