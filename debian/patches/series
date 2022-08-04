@@ -15,3 +15,6 @@
 14_xfixes-Fix-out-of-bounds-access-in-ProcXFixesCreateP.patch
 15_Xext-Fix-out-of-bounds-access-in-SProcScreenSaverSus.patch
 16_render-Fix-out-of-bounds-access-in-SProcRenderCompos.patch
+17_xkb-switch-to-array-index-loops-to-moving-pointers.patch
+18_xkb-add-request-length-validation-for-XkbSetGeometry.patch
+19_xkb-swap-XkbSetDeviceInfo-and-XkbSetDeviceInfoCheck.patch
