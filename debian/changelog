@@ -1,3 +1,9 @@
+xorg-server (2:1.20.14-1ubuntu9~20.04.5) focal; urgency=medium
+
+  * Backport to focal.
+
+ -- scpcom <scpcom@gmx.de>  Fri, 02 Feb 2023 22:42:01 +0200
+
 xorg-server (2:1.20.14-1) unstable; urgency=medium
 
   * New upstream release.
