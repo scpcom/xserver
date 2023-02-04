@@ -1,3 +1,9 @@
+xorg-server (2:1.20.14-1+deb11u3) bullseye-security; urgency=medium
+
+  * Update bullseye-security release.
+
+ -- scpcom <scpcom@gmx.de>  Fri, 03 Feb 2023 23:37:52 +0100
+
 xorg-server (2:1.20.14-1) unstable; urgency=medium
 
   * New upstream release.
