@@ -464,11 +464,8 @@ ProcXChangeFeedbackControl(ClientPtr client)
         break;
     case StringFeedbackClass:
     {
-        xStringFeedbackCtl *f;
+        xStringFeedbackCtl *f = ((xStringFeedbackCtl *) &stuff[1]);
 
-        REQUEST_AT_LEAST_EXTRA_SIZE(xChangeFeedbackControlReq,
-                                    sizeof(xStringFeedbackCtl));
-        f = ((xStringFeedbackCtl *) &stuff[1]);
         if (client->swapped) {
             if (len < bytes_to_int32(sizeof(xStringFeedbackCtl)))
                 return BadLength;
