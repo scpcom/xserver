@@ -550,7 +550,7 @@ can_exchange(ScrnInfoPtr scrn, DrawablePtr draw,
         if (drmmode_crtc->rotate_bo.dumb)
             return FALSE;
 
-        if (ms_crtc_on(config->crtc[i]))
+        if (xf86_crtc_on(config->crtc[i]))
             num_crtcs_on++;
     }
 
