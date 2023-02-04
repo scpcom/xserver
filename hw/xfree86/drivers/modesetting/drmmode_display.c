@@ -1642,11 +1642,6 @@ drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
     if (!ret)
         return;
 
-#ifdef GLAMOR_HAS_GBM
-    if (drmmode->glamor)
-        glamor_finish(pScreen);
-#endif
-
     pScreen->canDoBGNoneRoot = TRUE;
 }
 
