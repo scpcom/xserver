@@ -376,6 +376,9 @@ glamor_make_pixmap_exportable(PixmapPtr pixmap, Bool modifiers_ok)
      */
     glamor_egl_exchange_buffers(pixmap, exported);
 
+    /* Swap the devKind into the original pixmap, reflecting the bo's stride */
+    screen->ModifyPixmapHeader(pixmap, 0, 0, 0, 0, exported->devKind, NULL);
+
     screen->DestroyPixmap(exported);
 
     return TRUE;
@@ -391,6 +394,15 @@ glamor_gbm_bo_from_pixmap_internal(ScreenPtr screen, PixmapPtr pixmap)
         return NULL;
 
     return pixmap_priv->bo;
+}
+
+struct gbm_bo *
+glamor_gbm_bo_from_pixmap(ScreenPtr screen, PixmapPtr pixmap)
+{
+    if (!glamor_make_pixmap_exportable(pixmap, TRUE))
+        return NULL;
+
+    return glamor_gbm_bo_from_pixmap_internal(screen, pixmap);
 }
 
 struct gbm_bo *
@@ -709,6 +721,22 @@ glamor_get_modifiers(ScreenPtr screen, uint32_t format,
     return TRUE;
 #endif
 }
+
+_X_EXPORT const char *
+glamor_egl_get_driver_name(ScreenPtr screen)
+{
+#ifdef GLAMOR_HAS_EGL_QUERY_DRIVER
+    struct glamor_egl_screen_private *glamor_egl;
+
+    glamor_egl = glamor_egl_get_screen_private(xf86ScreenToScrn(screen));
+
+    if (epoxy_has_egl_extension(glamor_egl->display, "EGL_MESA_query_driver"))
+        return eglGetDisplayDriverName(glamor_egl->display);
+#endif
+
+    return NULL;
+}
+
 
 static Bool
 glamor_egl_destroy_pixmap(PixmapPtr pixmap)

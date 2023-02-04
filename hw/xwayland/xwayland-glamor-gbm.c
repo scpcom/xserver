@@ -36,6 +36,7 @@
 #include <drm_fourcc.h>
 
 #define MESA_EGL_NO_X11_HEADERS
+#define EGL_NO_X11
 #include <gbm.h>
 #include <glamor_egl.h>
 
@@ -110,18 +111,19 @@ wl_drm_format_for_depth(int depth)
 }
 
 static char
-is_fd_render_node(int fd)
+is_device_path_render_node (const char *device_path)
 {
-    struct stat render;
+    char is_render_node;
+    int fd;
 
-    if (fstat(fd, &render))
+    fd = open(device_path, O_RDWR | O_CLOEXEC);
+    if (fd < 0)
         return 0;
-    if (!S_ISCHR(render.st_mode))
-        return 0;
-    if (render.st_rdev & 0x80)
-        return 1;
 
-    return 0;
+    is_render_node = (drmGetNodeTypeFromFd(fd) == DRM_NODE_RENDER);
+    close(fd);
+
+    return is_render_node;
 }
 
 static PixmapPtr
@@ -153,6 +155,8 @@ xwl_glamor_gbm_create_pixmap_for_bo(ScreenPtr screen, struct gbm_bo *bo,
                                           xwl_screen->egl_context,
                                           EGL_NATIVE_PIXMAP_KHR,
                                           xwl_pixmap->bo, NULL);
+    if (xwl_pixmap->image == EGL_NO_IMAGE_KHR)
+      goto error;
 
     glGenTextures(1, &xwl_pixmap->texture);
     glBindTexture(GL_TEXTURE_2D, xwl_pixmap->texture);
@@ -160,14 +164,31 @@ xwl_glamor_gbm_create_pixmap_for_bo(ScreenPtr screen, struct gbm_bo *bo,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, xwl_pixmap->image);
+    if (eglGetError() != EGL_SUCCESS)
+      goto error;
+
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    glamor_set_pixmap_texture(pixmap, xwl_pixmap->texture);
+    /* `set_pixmap_texture()` may fail silently if the FBO creation failed,
+     * so we check again the texture to be sure it worked.
+     */
+    if (!glamor_get_pixmap_texture(pixmap))
+      goto error;
+
+    glamor_set_pixmap_type(pixmap, GLAMOR_TEXTURE_DRM);
     xwl_pixmap_set_private(pixmap, xwl_pixmap);
 
-    glamor_set_pixmap_texture(pixmap, xwl_pixmap->texture);
-    glamor_set_pixmap_type(pixmap, GLAMOR_TEXTURE_DRM);
-
     return pixmap;
+
+error:
+    if (xwl_pixmap->image != EGL_NO_IMAGE_KHR)
+      eglDestroyImageKHR(xwl_screen->egl_display, xwl_pixmap->image);
+    if (pixmap)
+      glamor_destroy_pixmap(pixmap);
+    free(xwl_pixmap);
+
+    return NULL;
 }
 
 static PixmapPtr
@@ -178,6 +199,7 @@ xwl_glamor_gbm_create_pixmap(ScreenPtr screen,
     struct xwl_screen *xwl_screen = xwl_screen_get(screen);
     struct xwl_gbm_private *xwl_gbm = xwl_gbm_get(xwl_screen);
     struct gbm_bo *bo;
+    PixmapPtr pixmap = NULL;
 
     if (width > 0 && height > 0 && depth >= 15 &&
         (hint == 0 ||
@@ -202,11 +224,22 @@ xwl_glamor_gbm_create_pixmap(ScreenPtr screen,
                                GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
         }
 
-        if (bo)
-            return xwl_glamor_gbm_create_pixmap_for_bo(screen, bo, depth);
+        if (bo) {
+            pixmap = xwl_glamor_gbm_create_pixmap_for_bo(screen, bo, depth);
+
+            if (!pixmap) {
+                gbm_bo_destroy(bo);
+            }
+            else if (xwl_screen->rootless && hint == CREATE_PIXMAP_USAGE_BACKING_PIXMAP) {
+                glamor_clear_pixmap(pixmap);
+            }
+        }
     }
 
-    return glamor_create_pixmap(screen, width, height, depth, hint);
+    if (!pixmap)
+        pixmap = glamor_create_pixmap(screen, width, height, depth, hint);
+
+    return pixmap;
 }
 
 static Bool
@@ -237,6 +270,9 @@ xwl_glamor_gbm_get_wl_buffer_for_pixmap(PixmapPtr pixmap,
     struct xwl_gbm_private *xwl_gbm = xwl_gbm_get(xwl_screen);
     unsigned short width = pixmap->drawable.width;
     unsigned short height = pixmap->drawable.height;
+    uint32_t format;
+    struct xwl_format *xwl_format = NULL;
+    Bool modifier_supported = FALSE;
     int prime_fd;
     int num_planes;
     uint32_t strides[4];
@@ -261,6 +297,8 @@ xwl_glamor_gbm_get_wl_buffer_for_pixmap(PixmapPtr pixmap,
     if (!xwl_pixmap->bo)
        return NULL;
 
+    format = wl_drm_format_for_depth(pixmap->drawable.depth);
+
     prime_fd = gbm_bo_get_fd(xwl_pixmap->bo);
     if (prime_fd == -1)
         return NULL;
@@ -279,7 +317,23 @@ xwl_glamor_gbm_get_wl_buffer_for_pixmap(PixmapPtr pixmap,
     offsets[0] = 0;
 #endif
 
-    if (xwl_gbm->dmabuf && modifier != DRM_FORMAT_MOD_INVALID) {
+    for (i = 0; i < xwl_screen->num_formats; i++) {
+       if (xwl_screen->formats[i].format == format) {
+          xwl_format = &xwl_screen->formats[i];
+          break;
+       }
+    }
+
+    if (xwl_format) {
+        for (i = 0; i < xwl_format->num_modifiers; i++) {
+            if (xwl_format->modifiers[i] == modifier) {
+                modifier_supported = TRUE;
+                break;
+            }
+        }
+    }
+
+    if (xwl_gbm->dmabuf && modifier_supported) {
         struct zwp_linux_buffer_params_v1 *params;
 
         params = zwp_linux_dmabuf_v1_create_params(xwl_gbm->dmabuf);
@@ -291,13 +345,12 @@ xwl_glamor_gbm_get_wl_buffer_for_pixmap(PixmapPtr pixmap,
 
         xwl_pixmap->buffer =
            zwp_linux_buffer_params_v1_create_immed(params, width, height,
-                                                   wl_drm_format_for_depth(pixmap->drawable.depth),
-                                                   0);
+                                                   format, 0);
         zwp_linux_buffer_params_v1_destroy(params);
     } else if (num_planes == 1) {
         xwl_pixmap->buffer =
             wl_drm_create_prime_buffer(xwl_gbm->drm, prime_fd, width, height,
-                                       wl_drm_format_for_depth(pixmap->drawable.depth),
+                                       format,
                                        0, gbm_bo_get_stride(xwl_pixmap->bo),
                                        0, 0,
                                        0, 0);
@@ -453,7 +506,8 @@ glamor_pixmap_from_fds(ScreenPtr screen, CARD8 num_fds, const int *fds,
           data.strides[i] = strides[i];
           data.offsets[i] = offsets[i];
        }
-       bo = gbm_bo_import(xwl_gbm->gbm, GBM_BO_IMPORT_FD_MODIFIER, &data, 0);
+       bo = gbm_bo_import(xwl_gbm->gbm, GBM_BO_IMPORT_FD_MODIFIER, &data,
+                          GBM_BO_USE_RENDERING);
 #endif
     } else if (num_fds == 1) {
        struct gbm_import_fd_data data;
@@ -464,7 +518,7 @@ glamor_pixmap_from_fds(ScreenPtr screen, CARD8 num_fds, const int *fds,
        data.stride = strides[0];
        data.format = gbm_format_for_depth(depth);
        bo = gbm_bo_import(xwl_gbm->gbm, GBM_BO_IMPORT_FD, &data,
-             GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+                          GBM_BO_USE_RENDERING);
     } else {
        goto error;
     }
@@ -617,14 +671,80 @@ static const dri3_screen_info_rec xwl_dri3_info = {
     .get_drawable_modifiers = glamor_get_drawable_modifiers,
 };
 
+static const char *
+get_render_node_path_for_device(const drmDevicePtr drm_device,
+                                const char *device_path)
+{
+    char *render_node_path = NULL;
+    char device_found = 0;
+    int i;
+
+    for (i = 0; i < DRM_NODE_MAX; i++) {
+        if ((drm_device->available_nodes & (1 << i)) == 0)
+           continue;
+
+        if (!strcmp (device_path, drm_device->nodes[i]))
+            device_found = 1;
+
+        if (is_device_path_render_node(drm_device->nodes[i]))
+            render_node_path = drm_device->nodes[i];
+
+        if (device_found && render_node_path)
+            return render_node_path;
+    }
+
+    return NULL;
+}
+
+static char *
+get_render_node_path(const char *device_path)
+{
+    drmDevicePtr *devices = NULL;
+    char *render_node_path = NULL;
+    int i, n_devices, max_devices;
+
+    max_devices = drmGetDevices2(0, NULL, 0);
+    if (max_devices <= 0)
+        goto out;
+
+    devices = calloc(max_devices, sizeof(drmDevicePtr));
+    if (!devices)
+        goto out;
+
+    n_devices = drmGetDevices2(0, devices, max_devices);
+    if (n_devices < 0)
+        goto out;
+
+    for (i = 0; i < n_devices; i++) {
+       const char *node_path = get_render_node_path_for_device(devices[i],
+                                                               device_path);
+       if (node_path) {
+           render_node_path = strdup(node_path);
+           break;
+       }
+    }
+
+out:
+    free(devices);
+    return render_node_path;
+}
+
 static void
 xwl_drm_handle_device(void *data, struct wl_drm *drm, const char *device)
 {
    struct xwl_screen *xwl_screen = data;
    struct xwl_gbm_private *xwl_gbm = xwl_gbm_get(xwl_screen);
    drm_magic_t magic;
+   char *render_node_path = NULL;
 
-   xwl_gbm->device_name = strdup(device);
+   if (!is_device_path_render_node(device))
+       render_node_path = get_render_node_path(device);
+
+   if (render_node_path)
+       xwl_gbm->device_name = render_node_path;
+   else
+       xwl_gbm->device_name = strdup(device);
+
    if (!xwl_gbm->device_name) {
        xwl_glamor_gbm_cleanup(xwl_screen);
        return;
@@ -638,7 +758,7 @@ xwl_drm_handle_device(void *data, struct wl_drm *drm, const char *device)
        return;
    }
 
-   if (is_fd_render_node(xwl_gbm->drm_fd)) {
+   if (drmGetNodeTypeFromFd(xwl_gbm->drm_fd) == DRM_NODE_RENDER) {
        xwl_gbm->fd_render_node = 1;
        xwl_screen->expecting_event--;
    } else {
@@ -689,6 +809,10 @@ xwl_dmabuf_handle_modifier(void *data, struct zwp_linux_dmabuf_v1 *dmabuf,
    struct xwl_screen *xwl_screen = data;
     struct xwl_format *xwl_format = NULL;
     int i;
+
+    if (modifier_hi == (DRM_FORMAT_MOD_INVALID >> 32) &&
+        modifier_lo == (DRM_FORMAT_MOD_INVALID & 0xffffffff))
+        return;
 
     for (i = 0; i < xwl_screen->num_formats; i++) {
         if (xwl_screen->formats[i].format == format) {

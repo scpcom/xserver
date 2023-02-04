@@ -122,9 +122,6 @@
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
 
-/* Define to 1 if you have the libdispatch (GCD) available */
-#undef HAVE_LIBDISPATCH
-
 /* Define to 1 if you have the <linux/agpgart.h> header file. */
 #undef HAVE_LINUX_AGPGART_H
 
@@ -133,6 +130,9 @@
 
 /* Define to 1 if you have the <linux/fb.h> header file. */
 #undef HAVE_LINUX_FB_H
+
+/* Define to 1 if you have the `memfd_create' function. */
+#undef HAVE_MEMFD_CREATE
 
 /* Define to 1 if you have the `mkostemp' function. */
 #undef HAVE_MKOSTEMP
@@ -458,9 +458,6 @@
 /* Wrap SIGBUS to catch MIT-SHM faults */
 #undef BUSFAULT
 
-/* Directory for shared memory temp files */
-#undef SHMDIR
-
 /* Don't let Xdefs.h define 'pointer' */
 #define _XTYPEDEF_POINTER       1
 
@@ -497,6 +494,9 @@
 /* Glamor can use eglQueryDmaBuf* functions */
 #undef GLAMOR_HAS_EGL_QUERY_DMABUF
 
+/* Glamor can use EGL_MESA_query_driver functions */
+#undef GLAMOR_HAS_EGL_QUERY_DRIVER
+
 /* byte order */
 #undef X_BYTE_ORDER
 
@@ -526,5 +526,8 @@
 
 /* Have epoll_create1() */
 #undef HAVE_EPOLL_CREATE1
+
+/* Have isastream */
+#undef HAVE_ISASTREAM
 
 #endif /* _DIX_CONFIG_H_ */

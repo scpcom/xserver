@@ -152,6 +152,19 @@ static RESTYPE RT_XKBCLIENT;
 #define	CHK_REQ_KEY_RANGE(err,first,num,r)  \
 	CHK_REQ_KEY_RANGE2(err,first,num,r,client->errorValue,BadValue)
 
+static Bool
+_XkbCheckRequestBounds(ClientPtr client, void *stuff, void *from, void *to) {
+    char *cstuff = (char *)stuff;
+    char *cfrom = (char *)from;
+    char *cto = (char *)to;
+
+    return cfrom < cto &&
+           cfrom >= cstuff &&
+           cfrom < cstuff + ((size_t)client->req_len << 2) &&
+           cto >= cstuff &&
+           cto <= cstuff + ((size_t)client->req_len << 2);
+}
+
 /***====================================================================***/
 
 int
@@ -2110,6 +2123,9 @@ SetKeySyms(ClientPtr client,
                 }
             }
         }
+        if (XkbKeyHasActions(xkb, i + req->firstKeySym))
+            XkbResizeKeyActions(xkb, i + req->firstKeySym,
+                                XkbNumGroups(wire->groupInfo) * wire->width);
         oldMap->kt_index[0] = wire->ktIndex[0];
         oldMap->kt_index[1] = wire->ktIndex[1];
         oldMap->kt_index[2] = wire->ktIndex[2];
@@ -2366,6 +2382,93 @@ SetVirtualModMap(XkbSrvInfoPtr xkbi,
     return (char *) wire;
 }
 
+#define _add_check_len(new) \
+    if (len > UINT32_MAX - (new) || len > req_len - (new)) goto bad; \
+    else len += new
+
+/**
+ * Check the length of the SetMap request
+ */
+static int
+_XkbSetMapCheckLength(xkbSetMapReq *req)
+{
+    size_t len = sz_xkbSetMapReq, req_len = req->length << 2;
+    xkbKeyTypeWireDesc *keytype;
+    xkbSymMapWireDesc *symmap;
+    BOOL preserve;
+    int i, map_count, nSyms;
+
+    if (req_len < len)
+        goto bad;
+    /* types */
+    if (req->present & XkbKeyTypesMask) {
+        keytype = (xkbKeyTypeWireDesc *)(req + 1);
+        for (i = 0; i < req->nTypes; i++) {
+            _add_check_len(XkbPaddedSize(sz_xkbKeyTypeWireDesc));
+            if (req->flags & XkbSetMapResizeTypes) {
+                _add_check_len(keytype->nMapEntries
+                               * sz_xkbKTSetMapEntryWireDesc);
+                preserve = keytype->preserve;
+                map_count = keytype->nMapEntries;
+                if (preserve) {
+                    _add_check_len(map_count * sz_xkbModsWireDesc);
+                }
+                keytype += 1;
+                keytype = (xkbKeyTypeWireDesc *)
+                          ((xkbKTSetMapEntryWireDesc *)keytype + map_count);
+                if (preserve)
+                    keytype = (xkbKeyTypeWireDesc *)
+                              ((xkbModsWireDesc *)keytype + map_count);
+            }
+        }
+    }
+    /* syms */
+    if (req->present & XkbKeySymsMask) {
+        symmap = (xkbSymMapWireDesc *)((char *)req + len);
+        for (i = 0; i < req->nKeySyms; i++) {
+            _add_check_len(sz_xkbSymMapWireDesc);
+            nSyms = symmap->nSyms;
+            _add_check_len(nSyms*sizeof(CARD32));
+            symmap += 1;
+            symmap = (xkbSymMapWireDesc *)((CARD32 *)symmap + nSyms);
+        }
+    }
+    /* actions */
+    if (req->present & XkbKeyActionsMask) {
+        _add_check_len(req->totalActs * sz_xkbActionWireDesc 
+                       + XkbPaddedSize(req->nKeyActs));
+    }
+    /* behaviours */
+    if (req->present & XkbKeyBehaviorsMask) {
+        _add_check_len(req->totalKeyBehaviors * sz_xkbBehaviorWireDesc);
+    }
+    /* vmods */
+    if (req->present & XkbVirtualModsMask) {
+        _add_check_len(XkbPaddedSize(Ones(req->virtualMods)));
+    }
+    /* explicit */
+    if (req->present & XkbExplicitComponentsMask) {
+        /* two bytes per non-zero explicit componen */
+        _add_check_len(XkbPaddedSize(req->totalKeyExplicit * sizeof(CARD16)));
+    }
+    /* modmap */
+    if (req->present & XkbModifierMapMask) {
+         /* two bytes per non-zero modmap component */
+        _add_check_len(XkbPaddedSize(req->totalModMapKeys * sizeof(CARD16)));
+    }
+    /* vmodmap */
+    if (req->present & XkbVirtualModMapMask) {
+        _add_check_len(req->totalVModMapKeys * sz_xkbVModMapWireDesc);
+    }
+    if (len == req_len)
+        return Success;
+bad:
+    ErrorF("[xkb] BOGUS LENGTH in SetMap: expected %ld got %ld\n",
+           len, req_len);
+    return BadLength;
+}
+
+
 /**
  * Check if the given request can be applied to the given device but don't
  * actually do anything..
@@ -2382,6 +2485,9 @@ _XkbSetMapChecks(ClientPtr client, DeviceIntPtr dev, xkbSetMapReq * req,
     CARD16 symsPerKey[XkbMaxLegalKeyCode + 1] = { 0 };
     XkbSymMapPtr map;
     int i;
+
+    if (!dev->key)
+        return 0;
 
     xkbi = dev->key->xkbInfo;
     xkb = xkbi->desc;
@@ -2494,6 +2600,9 @@ _XkbSetMap(ClientPtr client, DeviceIntPtr dev, xkbSetMapReq * req, char *values)
     Bool sentNKN;
     XkbSrvInfoPtr xkbi;
     XkbDescPtr xkb;
+
+    if (!dev->key)
+        return Success;
 
     xkbi = dev->key->xkbInfo;
     xkb = xkbi->desc;
@@ -2616,6 +2725,11 @@ ProcXkbSetMap(ClientPtr client)
 
     CHK_KBD_DEVICE(dev, stuff->deviceSpec, client, DixManageAccess);
     CHK_MASK_LEGAL(0x01, stuff->present, XkbAllMapComponentsMask);
+
+    /* first verify the request length carefully */
+    rc = _XkbSetMapCheckLength(stuff);
+    if (rc != Success)
+        return rc;
 
     tmp = (char *) &stuff[1];
 
@@ -4036,6 +4150,8 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
             client->errorValue = _XkbErrCode2(0x04, stuff->firstType);
             return BadAccess;
         }
+        if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + stuff->nTypes))
+            return BadLength;
         old = tmp;
         tmp = _XkbCheckAtoms(tmp, stuff->nTypes, client->swapped, &bad);
         if (!tmp) {
@@ -4065,6 +4181,8 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
         }
         width = (CARD8 *) tmp;
         tmp = (CARD32 *) (((char *) tmp) + XkbPaddedSize(stuff->nKTLevels));
+        if (!_XkbCheckRequestBounds(client, stuff, width, tmp))
+            return BadLength;
         type = &xkb->map->types[stuff->firstKTLevel];
         for (i = 0; i < stuff->nKTLevels; i++, type++) {
             if (width[i] == 0)
@@ -4074,6 +4192,8 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
                                                   type->num_levels, width[i]);
                 return BadMatch;
             }
+            if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + width[i]))
+                return BadLength;
             tmp = _XkbCheckAtoms(tmp, width[i], client->swapped, &bad);
             if (!tmp) {
                 client->errorValue = bad;
@@ -4086,6 +4206,9 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
             client->errorValue = 0x08;
             return BadMatch;
         }
+        if (!_XkbCheckRequestBounds(client, stuff, tmp,
+                                    tmp + Ones(stuff->indicators)))
+            return BadLength;
         tmp = _XkbCheckMaskedAtoms(tmp, XkbNumIndicators, stuff->indicators,
                                    client->swapped, &bad);
         if (!tmp) {
@@ -4098,6 +4221,9 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
             client->errorValue = 0x09;
             return BadMatch;
         }
+        if (!_XkbCheckRequestBounds(client, stuff, tmp,
+                                    tmp + Ones(stuff->virtualMods)))
+            return BadLength;
         tmp = _XkbCheckMaskedAtoms(tmp, XkbNumVirtualMods,
                                    (CARD32) stuff->virtualMods,
                                    client->swapped, &bad);
@@ -4111,6 +4237,9 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
             client->errorValue = 0x0a;
             return BadMatch;
         }
+        if (!_XkbCheckRequestBounds(client, stuff, tmp,
+                                    tmp + Ones(stuff->groupNames)))
+            return BadLength;
         tmp = _XkbCheckMaskedAtoms(tmp, XkbNumKbdGroups,
                                    (CARD32) stuff->groupNames,
                                    client->swapped, &bad);
@@ -4132,9 +4261,14 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
                              stuff->nKeys);
             return BadValue;
         }
+        if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + stuff->nKeys))
+            return BadLength;
         tmp += stuff->nKeys;
     }
     if ((stuff->which & XkbKeyAliasesMask) && (stuff->nKeyAliases > 0)) {
+        if (!_XkbCheckRequestBounds(client, stuff, tmp,
+                                    tmp + (stuff->nKeyAliases * 2)))
+            return BadLength;
         tmp += stuff->nKeyAliases * 2;
     }
     if (stuff->which & XkbRGNamesMask) {
@@ -4142,6 +4276,9 @@ _XkbSetNamesCheck(ClientPtr client, DeviceIntPtr dev,
             client->errorValue = _XkbErrCode2(0x0d, stuff->nRadioGroups);
             return BadValue;
         }
+        if (!_XkbCheckRequestBounds(client, stuff, tmp,
+                                    tmp + stuff->nRadioGroups))
+            return BadLength;
         tmp = _XkbCheckAtoms(tmp, stuff->nRadioGroups, client->swapped, &bad);
         if (!tmp) {
             client->errorValue = bad;
@@ -4335,6 +4472,8 @@ ProcXkbSetNames(ClientPtr client)
     /* check device-independent stuff */
     tmp = (CARD32 *) &stuff[1];
 
+    if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + 1))
+        return BadLength;
     if (stuff->which & XkbKeycodesNameMask) {
         tmp = _XkbCheckAtoms(tmp, 1, client->swapped, &bad);
         if (!tmp) {
@@ -4342,6 +4481,8 @@ ProcXkbSetNames(ClientPtr client)
             return BadAtom;
         }
     }
+    if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + 1))
+        return BadLength;
     if (stuff->which & XkbGeometryNameMask) {
         tmp = _XkbCheckAtoms(tmp, 1, client->swapped, &bad);
         if (!tmp) {
@@ -4349,6 +4490,8 @@ ProcXkbSetNames(ClientPtr client)
             return BadAtom;
         }
     }
+    if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + 1))
+        return BadLength;
     if (stuff->which & XkbSymbolsNameMask) {
         tmp = _XkbCheckAtoms(tmp, 1, client->swapped, &bad);
         if (!tmp) {
@@ -4356,6 +4499,8 @@ ProcXkbSetNames(ClientPtr client)
             return BadAtom;
         }
     }
+    if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + 1))
+        return BadLength;
     if (stuff->which & XkbPhysSymbolsNameMask) {
         tmp = _XkbCheckAtoms(tmp, 1, client->swapped, &bad);
         if (!tmp) {
@@ -4363,6 +4508,8 @@ ProcXkbSetNames(ClientPtr client)
             return BadAtom;
         }
     }
+    if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + 1))
+        return BadLength;
     if (stuff->which & XkbTypesNameMask) {
         tmp = _XkbCheckAtoms(tmp, 1, client->swapped, &bad);
         if (!tmp) {
@@ -4370,6 +4517,8 @@ ProcXkbSetNames(ClientPtr client)
             return BadAtom;
         }
     }
+    if (!_XkbCheckRequestBounds(client, stuff, tmp, tmp + 1))
+        return BadLength;
     if (stuff->which & XkbCompatNameMask) {
         tmp = _XkbCheckAtoms(tmp, 1, client->swapped, &bad);
         if (!tmp) {
@@ -6476,7 +6625,9 @@ SetDeviceIndicators(char *wire,
                     unsigned changed,
                     int num,
                     int *status_rtrn,
-                    ClientPtr client, xkbExtensionDeviceNotify * ev)
+                    ClientPtr client,
+                    xkbExtensionDeviceNotify * ev,
+                    xkbSetDeviceInfoReq * stuff)
 {
     xkbDeviceLedsWireDesc *ledWire;
     int i;
@@ -6497,6 +6648,11 @@ SetDeviceIndicators(char *wire,
         xkbIndicatorMapWireDesc *mapWire;
         XkbSrvLedInfoPtr sli;
 
+        if (!_XkbCheckRequestBounds(client, stuff, ledWire, ledWire + 1)) {
+            *status_rtrn = BadLength;
+            return (char *) ledWire;
+        }
+
         namec = mapc = statec = 0;
         sli = XkbFindSrvLedInfo(dev, ledWire->ledClass, ledWire->ledID,
                                 XkbXI_IndicatorMapsMask);
@@ -6515,6 +6671,10 @@ SetDeviceIndicators(char *wire,
             memset((char *) sli->names, 0, XkbNumIndicators * sizeof(Atom));
             for (n = 0, bit = 1; n < XkbNumIndicators; n++, bit <<= 1) {
                 if (ledWire->namesPresent & bit) {
+                    if (!_XkbCheckRequestBounds(client, stuff, atomWire, atomWire + 1)) {
+                        *status_rtrn = BadLength;
+                        return (char *) atomWire;
+                    }
                     sli->names[n] = (Atom) *atomWire;
                     if (sli->names[n] == None)
                         ledWire->namesPresent &= ~bit;
@@ -6532,6 +6692,10 @@ SetDeviceIndicators(char *wire,
         if (ledWire->mapsPresent) {
             for (n = 0, bit = 1; n < XkbNumIndicators; n++, bit <<= 1) {
                 if (ledWire->mapsPresent & bit) {
+                    if (!_XkbCheckRequestBounds(client, stuff, mapWire, mapWire + 1)) {
+                        *status_rtrn = BadLength;
+                        return (char *) mapWire;
+                    }
                     sli->maps[n].flags = mapWire->flags;
                     sli->maps[n].which_groups = mapWire->whichGroups;
                     sli->maps[n].groups = mapWire->groups;
@@ -6611,7 +6775,7 @@ _XkbSetDeviceInfoCheck(ClientPtr client, DeviceIntPtr dev,
     ed.deviceID = dev->id;
     wire = (char *) &stuff[1];
     if (stuff->change & XkbXI_ButtonActionsMask) {
-        int nBtns, sz, i;
+	int nBtns, sz, i;
         XkbAction *acts;
         DeviceIntPtr kbd;
 
@@ -6623,7 +6787,11 @@ _XkbSetDeviceInfoCheck(ClientPtr client, DeviceIntPtr dev,
                 return BadAlloc;
             dev->button->xkb_acts = acts;
         }
+        if (stuff->firstBtn + stuff->nBtns > nBtns)
+            return BadValue;
         sz = stuff->nBtns * SIZEOF(xkbActionWireDesc);
+        if (!_XkbCheckRequestBounds(client, stuff, wire, (char *) wire + sz))
+            return BadLength;
         memcpy((char *) &acts[stuff->firstBtn], (char *) wire, sz);
         wire += sz;
         ed.reason |= XkbXI_ButtonActionsMask;
@@ -6644,7 +6812,8 @@ _XkbSetDeviceInfoCheck(ClientPtr client, DeviceIntPtr dev,
         int status = Success;
 
         wire = SetDeviceIndicators(wire, dev, stuff->change,
-                                   stuff->nDeviceLedFBs, &status, client, &ed);
+                                   stuff->nDeviceLedFBs, &status, client, &ed,
+                                   stuff);
         if (status != Success)
             return status;
     }

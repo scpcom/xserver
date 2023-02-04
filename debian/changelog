@@ -1,3 +1,176 @@
+xorg-server (2:1.20.11-1+deb11u3) bullseye-security; urgency=medium
+
+  * xkb: proof GetCountedString against request length attacks (CVE-2022-3550)
+  * xkb: fix some possible memleaks in XkbGetKbdByName (CVE-2022-3551)
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Fri, 11 Nov 2022 13:37:52 +0100
+
+xorg-server (2:1.20.11-1+deb11u2) bullseye-security; urgency=medium
+
+  * xkb: add request length validation for XkbSetGeometry (CVE-2022-2319)
+  * xkb: swap XkbSetDeviceInfo and XkbSetDeviceInfoCheck (CVE-2022-2320)
+  * Closes: #1014903.
+
+ -- Emilio Pozuelo Monfort <pochu@debian.org>  Fri, 05 Aug 2022 10:00:36 +0200
+
+xorg-server (2:1.20.11-1+deb11u1) bullseye-security; urgency=high
+
+  * Team upload.
+  * record: Fix out of bounds access in SwapCreateRegister() [CVE-2021-4011]
+  * xfixes: Fix out of bounds access in *ProcXFixesCreatePointerBarrier() [CVE-2021-4009]
+  * Xext: Fix out of bounds access in SProcScreenSaverSuspend() [CVE-2021-4010]
+  * render: Fix out of bounds access in SProcRenderCompositeGlyphs() [CVE-2021-4008]
+
+ -- Julien Cristau <jcristau@debian.org>  Thu, 16 Dec 2021 18:08:23 +0100
+
+xorg-server (2:1.20.11-1) unstable; urgency=medium
+
+  * New upstream release.
+    - CVE-2021-3472
+  * Add signing key for Matt Turner.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 13 Apr 2021 19:07:31 +0300
+
+xorg-server (2:1.20.10-3) unstable; urgency=medium
+
+  [ Julien Cristau ]
+  * Drop workaround for mips* FTBFS added in 2:1.20.10-1, shouldn't be
+    necessary anymore with the change in 2:1.20.10-2.
+
+  [ Sven Joachim ]
+  * Recommend default-logind | logind rather than libpam-systemd in
+    xserver-xorg-core (Closes: #923198).
+  * Use mktemp rather than tempfile in xserver-xorg-legacy.postinst
+    (Closes: #979751).
+  * Use dpkg-vendor to get the vendor name, drop lsb-release from
+    Build-Depends.
+
+   [ Vagrant Cascadian ]
+  * Avoid embedding the running kernel version (Closes: #976898).
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 17 Feb 2021 11:17:43 +0200
+
+xorg-server (2:1.20.10-2) unstable; urgency=medium
+
+  * Stop defining inb/outb on mips, to fix FTBFS in some drivers with GCC 10
+    (closes: #978670).
+
+ -- Julien Cristau <jcristau@debian.org>  Wed, 06 Jan 2021 10:33:33 +0100
+
+xorg-server (2:1.20.10-1) unstable; urgency=medium
+
+  [ Timo Aaltonen ]
+  * New upstream release.
+    - CVE-2020-14360, CVE-2020-25712 (Closes: #976216)
+  * Drop patches:
+    - 0001-Revert-*: Reverted upstream in this version
+    - revert-hw-xfree86-avoid-cursor-use-after-free.diff: Issue fixed in this version
+    - revert-disabling-xss-for-rootless-xwayland.diff: Was resolved upstream as
+      being a client bug
+  * control: Add libnvidia-egl-wayland-dev to build-depends, enables
+    EGLStream support in xwayland.
+
+  [ Adrian Bunk ]
+  * rules: Add a workaround to fix build on mips*. (Closes: #975579)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 02 Dec 2020 12:41:35 +0200
+
+xorg-server (2:1.20.9-2) unstable; urgency=medium
+
+  * fix-pci-probing-segfault.diff: Dropped and revert three commits
+    instead. (Closes: #969739)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Thu, 24 Sep 2020 12:19:06 +0300
+
+xorg-server (2:1.20.9-1) unstable; urgency=medium
+
+  * New upstream release.
+    - CVE-2020-14347 (Closes: #968986)
+  * fix-pci-probing-segfault.diff: Fix a regression in 1.20.9 when
+    probing the GPU.
+  * revert-hw-xfree86-avoid-cursor-use-after-free.diff: Revert a commit
+    which is causing server crashes.
+  * revert-disabling-xss-for-rootless-xwayland.diff: Fix a regression
+    where apps crash under Xwayland.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Mon, 31 Aug 2020 18:49:48 +0300
+
+xorg-server (2:1.20.8-2) unstable; urgency=medium
+
+  * rules: Exclude udeb/ from indep dh_missing. (Closes: #955399)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 31 Mar 2020 13:14:40 +0300
+
+xorg-server (2:1.20.8-1) unstable; urgency=medium
+
+  * New upstream release.
+  * patches: Dropped patches applied upstream:
+    - fix-modesetting-build.diff
+    - add-EGL_QUERY_DRIVER-check.diff
+    - fix-rotate-crash.diff
+  * control: Use debhelper-compat, bump to 12.
+  * rules: Migrate to dh_missing.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Mon, 30 Mar 2020 15:48:38 +0300
+
+xorg-server (2:1.20.7-4) unstable; urgency=medium
+
+  [ Jordan Justen ]
+  * add-EGL_QUERY_DRIVER-check.diff: Add missing change from upstream
+    to fix glamor getting the driver name from EGL.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Sat, 29 Feb 2020 07:05:06 +0200
+
+xorg-server (2:1.20.7-3) unstable; urgency=medium
+
+  * fix-rotate-crash.diff: Fix a crash if rotation is set on xorg.conf.
+    (Closes: #949257)
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Wed, 05 Feb 2020 18:27:36 +0200
+
+xorg-server (2:1.20.7-2) unstable; urgency=medium
+
+  * add-EGL_QUERY_DRIVER-check.diff: Add a check for EGL_QUERY_DRIVER to
+    autotools.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 14 Jan 2020 12:13:49 +0200
+
+xorg-server (2:1.20.7-1) unstable; urgency=medium
+
+  * New upstream release.
+  * 07_use-modesetting-driver-by-default-on-GeForce.diff: Modified to
+    not include xf86drm.h on Hurd. (Closes: #947746)
+  * control: Add mesa-common-dev and libx11-xcb-dev to build-depends.
+    (Closes: #947748)
+  * serverminver: Bump video abi minor.
+  * fix-modesetting-build.diff: Add a missing include to fix the build.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Tue, 14 Jan 2020 10:50:19 +0200
+
+xorg-server (2:1.20.6-1) unstable; urgency=medium
+
+  [ Sven Joachim ]
+  * Remove the explicit build and build-indep targets (Closes: #941128).
+  * Exclude the directory where xorg-server.tar.xz is built from it
+    (Closes: #930405).
+  * Make the xorg-server-source binary package reproducible by specifying
+    suitable options to tar when creating /tmp/xorg-server.tar.xz.
+  * Set Rules-Requires-Root to binary-targets.
+  * Drop dependency on dummy package libegl1-mesa (Closes: #930608).
+  * Remove no longer used lintian overrides from version 2:1.11.2.901-1.
+  * Bump debhelper compat level to 11.
+    - Drop autoreconf and --parallel from the dh sequence, default since
+      compat level 10.  Remove dh-autoreconf from Build-Depends, redundant.
+  * Drop dpkg-dev build dependency, already fulfilled in wheezy.
+  * Add xz-utils to Build-Depends-Indep.
+  * Fix a typo in the xvfb-run manpage.
+
+  [ Timo Aaltonen ]
+  * New upstream release.
+  * Add signing key from Matt Turner.
+
+ -- Timo Aaltonen <tjaalton@debian.org>  Mon, 25 Nov 2019 11:49:09 +0200
+
 xorg-server (2:1.20.4-1) unstable; urgency=medium
 
   [ Timo Aaltonen ]
@@ -2020,7 +2193,7 @@ xorg-server (2:1.5.99.901-1) experimental; urgency=low
   [ Timo Aaltonen ]
   * debian/control:
     - Add x11proto-dri2-dev to build-depends.
-    - Bump the x11proto-randr-dev build-dep version to 1.2.99.3. 
+    - Bump the x11proto-randr-dev build-dep version to 1.2.99.3.
     - Bump the libpixman-1-dev build-dep version to 0.13.2.
     - Bump the xtrans-dev build-dep version to 1.2.2.
     - Bump the x11proto-xext-dev build-dep version to 7.0.3.
@@ -2167,7 +2340,7 @@ xorg-server (2:1.4.99.905-1) experimental; urgency=low
 
   [ Timo Aaltonen ]
   * Re-enable dri & glx.
-  * Add a build-dep on mesa-common-dev (>= 7.1~rc1) and bump the desired 
+  * Add a build-dep on mesa-common-dev (>= 7.1~rc1) and bump the desired
     version of libgl1-mesa-dev respectively.
   * Bump the libdrm-dev build-dep version to 2.3.1.
 
@@ -3249,7 +3422,7 @@ xorg-server (2:1.1.1-19) unstable; urgency=high
     (/usr/X11R6/lib/X11/fonts/Type1 not "/usr/X11R6/lib/  X11/fonts/Type1")
 
   [ David Nusinow ]
-  * Conflict with and replace xserver-common, because that package used to 
+  * Conflict with and replace xserver-common, because that package used to
     provide the SecurityPolicy file. This is an RC bugfix because it breaks
     upgrades, so it gets a high urgency. Thanks Christian Tsotras and Lionel
     Elie Mamane for reporting and it. Closes: #402658

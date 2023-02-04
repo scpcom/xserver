@@ -41,6 +41,7 @@
 #include "compiler.h"
 #include "xf86Pci.h"
 #include "mipointer.h"
+#include "mipointrst.h"
 #include "micmap.h"
 #include "misyncshm.h"
 #include "misyncstr.h"
@@ -740,7 +741,7 @@ msBlockHandler_oneshot(ScreenPtr pScreen, void *pTimeout)
 
     msBlockHandler(pScreen, pTimeout);
 
-    drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE);
+    drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE, FALSE);
 }
 
 static void
@@ -1112,8 +1113,12 @@ PreInit(ScrnInfoPtr pScrn, int flags)
 #endif
     }
 
-    ret = drmSetClientCap(ms->fd, DRM_CLIENT_CAP_ATOMIC, 1);
-    ms->atomic_modeset = (ret == 0);
+    if (xf86ReturnOptValBool(ms->drmmode.Options, OPTION_ATOMIC, FALSE)) {
+        ret = drmSetClientCap(ms->fd, DRM_CLIENT_CAP_ATOMIC, 1);
+        ms->atomic_modeset = (ret == 0);
+    } else {
+        ms->atomic_modeset = FALSE;
+    }
 
     /* Try to enable atomic cap, but not doing atomic modeset */
     drmSetClientCap(ms->fd, DRM_CLIENT_CAP_ATOMIC, 2);
@@ -1413,7 +1418,6 @@ static Bool
 CreateScreenResources(ScreenPtr pScreen)
 {
     ScrnInfoPtr pScrn = xf86ScreenToScrn(pScreen);
-    rrScrPrivPtr pScrPriv = rrGetScrPriv(pScreen);
     modesettingPtr ms = modesettingPTR(pScrn);
     PixmapPtr rootPixmap;
     Bool ret;
@@ -1424,7 +1428,7 @@ CreateScreenResources(ScreenPtr pScreen)
     ret = pScreen->CreateScreenResources(pScreen);
     pScreen->CreateScreenResources = CreateScreenResources;
 
-    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, pScrn->is_gpu))
+    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, pScrn->is_gpu, FALSE))
         return FALSE;
 
     if (!drmmode_handle_new_screen_pixmap(&ms->drmmode))
@@ -1481,10 +1485,14 @@ CreateScreenResources(ScreenPtr pScreen)
         }
     }
 
-    pScrPriv->rrEnableSharedPixmapFlipping = msEnableSharedPixmapFlipping;
-    pScrPriv->rrDisableSharedPixmapFlipping = msDisableSharedPixmapFlipping;
+    if (dixPrivateKeyRegistered(rrPrivKey)) {
+        rrScrPrivPtr pScrPriv = rrGetScrPriv(pScreen);
 
-    pScrPriv->rrStartFlippingPixmapTracking = msStartFlippingPixmapTracking;
+        pScrPriv->rrEnableSharedPixmapFlipping = msEnableSharedPixmapFlipping;
+        pScrPriv->rrDisableSharedPixmapFlipping = msDisableSharedPixmapFlipping;
+
+        pScrPriv->rrStartFlippingPixmapTracking = msStartFlippingPixmapTracking;
+    }
 
     return ret;
 }
@@ -1732,6 +1740,21 @@ ScreenInit(ScreenPtr pScreen, int argc, char **argv)
     xf86SetSilkenMouse(pScreen);
     miDCInitialize(pScreen, xf86GetPointerScreenFuncs());
 
+    /* If pageflip is enabled hook the screen's cursor-sprite (swcursor) funcs.
+     * So that we can disabe page-flipping on fallback to a swcursor. */
+    if (ms->drmmode.pageflip) {
+        miPointerScreenPtr PointPriv =
+            dixLookupPrivate(&pScreen->devPrivates, miPointerScreenKey);
+
+        if (!dixRegisterScreenPrivateKey(&ms->drmmode.spritePrivateKeyRec,
+                                         pScreen, PRIVATE_DEVICE,
+                                         sizeof(msSpritePrivRec)))
+            return FALSE;
+
+        ms->SpriteFuncs = PointPriv->spriteFuncs;
+        PointPriv->spriteFuncs = &drmmode_sprite_funcs;
+    }
+
     /* Need to extend HWcursor support to handle mask interleave */
     if (!ms->drmmode.sw_cursor)
         xf86_cursors_init(pScreen, ms->cursor_width, ms->cursor_height,
@@ -1912,8 +1935,25 @@ EnterVT(ScrnInfoPtr pScrn)
 
     SetMaster(pScrn);
 
-    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE))
-        return FALSE;
+    drmmode_update_kms_state(&ms->drmmode);
+
+    /* allow not all modes to be set successfully since some events might have
+     * happened while not being master that could prevent the previous
+     * configuration from being re-applied.
+     */
+    if (!drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE, TRUE)) {
+        xf86DisableUnusedFunctions(pScrn);
+
+        /* TODO: check that at least one screen is on, to allow the user to fix
+         * their setup if all modeset failed...
+         */
+
+        /* Tell the desktop environment that something changed, so that they
+         * can hopefully correct the situation
+         */
+        RRSetChanged(xf86ScrnToScreen(pScrn));
+        RRTellChanged(xf86ScrnToScreen(pScrn));
+    }
 
     return TRUE;
 }

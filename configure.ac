@@ -26,9 +26,9 @@ dnl
 dnl Process this file with autoconf to create configure.
 
 AC_PREREQ(2.60)
-AC_INIT([xorg-server], 1.20.4, [https://gitlab.freedesktop.org/xorg/xserver/issues], xorg-server)
-RELEASE_DATE="2019-02-25"
-RELEASE_NAME="Chestnut Tortelloni"
+AC_INIT([xorg-server], 1.20.11, [https://gitlab.freedesktop.org/xorg/xserver/issues], xorg-server)
+RELEASE_DATE="2021-04-13"
+RELEASE_NAME="Arroz con Pollo"
 AC_CONFIG_SRCDIR([Makefile.am])
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([foreign dist-bzip2])
@@ -159,7 +159,7 @@ dnl Checks for library functions.
 AC_CHECK_FUNCS([backtrace geteuid getuid issetugid getresuid \
 	getdtablesize getifaddrs getpeereid getpeerucred getprogname getzoneid \
 	mmap posix_fallocate seteuid shmctl64 strncasecmp vasprintf vsnprintf \
-	walkcontext setitimer poll epoll_create1 mkostemp])
+	walkcontext setitimer poll epoll_create1 mkostemp memfd_create isastream])
 AC_CONFIG_LIBOBJ_DIR([os])
 AC_REPLACE_FUNCS([reallocarray strcasecmp strcasestr strlcat strlcpy strndup\
 	timingsafe_memcmp])
@@ -695,10 +695,6 @@ case $host_os in
 			fi
 		fi
 
-		AC_CHECK_FUNC(dispatch_async,
-		              AC_DEFINE([HAVE_LIBDISPATCH], 1, [Define to 1 if you have the libdispatch (GCD) available]),
-		              [])
-
 		if test "x$XQUARTZ" = xyes ; then
 			XQUARTZ=yes
 			XVFB=no
@@ -766,7 +762,7 @@ LIBDRI="dri >= 7.8.0"
 LIBDRM="libdrm >= 2.4.89"
 LIBEGL="egl"
 LIBGBM="gbm >= 10.2.0"
-LIBGL="gl >= 7.1.0"
+LIBGL="gl >= 1.2"
 LIBXEXT="xext >= 1.0.99.4"
 LIBXFONT="xfont2 >= 2.0.0"
 LIBXI="xi >= 1.2.99.1"
@@ -1065,9 +1061,11 @@ if test "x$SCREENSAVER" = xyes; then
 	SDK_REQUIRED_MODULES="$SDK_REQUIRED_MODULES $SCRNSAVERPROTO"
 fi
 
+HASHTABLE=no
 AM_CONDITIONAL(RES, [test "x$RES" = xyes])
 if test "x$RES" = xyes; then
 	AC_DEFINE(RES, 1, [Support X resource extension])
+	HASHTABLE=yes
 	REQUIRED_MODULES="$REQUIRED_MODULES $RESOURCEPROTO"
 	SDK_REQUIRED_MODULES="$SDK_REQUIRED_MODULES $RESOURCEPROTO"
 fi
@@ -1117,54 +1115,11 @@ case "$DRI2,$HAVE_DRI2PROTO" in
 	yes,yes | auto,yes)
 		AC_DEFINE(DRI2, 1, [Build DRI2 extension])
 		DRI2=yes
-		LIBGL="gl >= 9.2.0"
+		LIBGL="gl >= 1.2"
 		SDK_REQUIRED_MODULES="$SDK_REQUIRED_MODULES $DRI2PROTO"
 		;;
 esac
 AM_CONDITIONAL(DRI2, test "x$DRI2" = xyes)
-
-dnl
-dnl Locate a suitable tmp file system for creating shared memeory files
-dnl
-
-AC_ARG_WITH(shared-memory-dir, AS_HELP_STRING([--with-shared-memory-dir=PATH], [Path to directory in a world-writable temporary directory for anonymous shared memory (default: auto)]),
-[],
-[with_shared_memory_dir=yes])
-
-shmdirs="/run/shm /var/tmp /tmp"
-
-case x"$with_shared_memory_dir" in
-xyes)
-	for dir in $shmdirs; do
-		case x"$with_shared_memory_dir" in
-		xyes)
-			echo Checking temp dir "$dir"
-			if test -d "$dir"; then
-				with_shared_memory_dir="$dir"
-			fi
-			;;
-		esac
-	done
-	;;
-x/*)
-	;;
-xno)
-	;;
-*)
-	AC_MSG_ERROR([Invalid directory specified for --with-shared-memory-dir: $with_shared_memory_dir])
-	;;
-esac
-
-case x"$with_shared_memory_dir" in
-xyes)
-	AC_MSG_ERROR([No directory found for shared memory temp files.])
-	;;
-xno)
-	;;
-*)
-	AC_DEFINE_UNQUOTED(SHMDIR, ["$with_shared_memory_dir"], [Directory for shared memory temp files])
-	;;
-esac
 
 AC_ARG_ENABLE(xtrans-send-fds,	AS_HELP_STRING([--disable-xtrans-send-fds], [Use Xtrans support for fd passing (default: auto)]), [XTRANS_SEND_FDS=$enableval], [XTRANS_SEND_FDS=auto])
 
@@ -1282,7 +1237,7 @@ esac
 
 AM_CONDITIONAL(DRI3, test "x$DRI3" = xyes)
 
-if test "x$DRI" = xyes || test "x$DRI2" = xyes || test "x$DRI3" = xyes || test "x$CONFIG_UDEV_KMS" = xyes; then
+if test "x$DRI" = xyes || test "x$DRI2" = xyes || test "x$DRI3" = xyes || test "x$CONFIG_UDEV_KMS" = xyes || test "x$XORG" = xyes; then
 	if test "x$DRM" = xyes; then
 		AC_DEFINE(WITH_LIBDRM, 1, [Building with libdrm support])
 		PKG_CHECK_MODULES([LIBDRM], $LIBDRM)
@@ -1294,12 +1249,15 @@ if test "x$GLX" = xyes; then
 	PKG_CHECK_MODULES([GL], $GLPROTO $LIBGL)
 	AC_SUBST(XLIB_CFLAGS)
 	AC_DEFINE(GLXEXT, 1, [Build GLX extension])
+	HASHTABLE=yes
 	GLX_LIBS='$(top_builddir)/glx/libglx.la $(top_builddir)/glx/libglxvnd.la'
 	GLX_SYS_LIBS="$GLX_SYS_LIBS $GL_LIBS"
 else
         GLX=no
 fi
 AM_CONDITIONAL(GLX, test "x$GLX" = xyes)
+
+AM_CONDITIONAL(HASHTABLE, test "x$HASHTABLE" = xyes)
 
 AC_SUBST([GLX_DEFINES])
 AC_SUBST([GLX_SYS_LIBS])
@@ -2113,6 +2071,10 @@ if test "x$GLAMOR" = xyes; then
 
 	PKG_CHECK_EXISTS(epoxy >= 1.4.4,
 			 [AC_DEFINE(GLAMOR_HAS_EGL_QUERY_DMABUF, 1, [Have GLAMOR_HAS_EGL_QUERY_DMABUF])],
+			 [])
+
+	PKG_CHECK_EXISTS(epoxy >= 1.5.4,
+			 [AC_DEFINE(GLAMOR_HAS_EGL_QUERY_DRIVER, 1, [Have GLAMOR_HAS_EGL_QUERY_DRIVER])],
 			 [])
 
 	PKG_CHECK_MODULES(GBM, "$LIBGBM", [GBM=yes], [GBM=no])

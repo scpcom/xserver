@@ -5,17 +5,25 @@ include debian/rules.flags
 include /usr/share/dpkg/architecture.mk
 
 %:
-	dh $@ --with quilt,autoreconf --parallel
+	dh $@ --with quilt
 
-build-source-stamp:
+override_dh_autoreconf-arch: abibumpcheck
+	dh_autoreconf
+
+override_dh_autoreconf-indep:
+	dh_autoreconf
 	mkdir -p build-source
 	tar \
 	--owner=0 --group=0 \
         --transform 's,^,xorg-server/,' \
 	--exclude=debian \
 	--exclude=autom4te.cache \
+	--exclude=build-source \
+	--sort=name \
+	--mtime=@$(SOURCE_DATE_EPOCH) \
+	--clamp-mtime \
+	--mode=u+rw,go+r,go-w,a-s \
         -cf - * | xz > build-source/xorg-server.tar.xz
-	>$@
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=debian/build/main -- \
@@ -34,9 +42,6 @@ override_dh_auto_build:
 override_dh_auto_test:
 	dh_auto_test -- -j1 VERBOSE=1
 
-build: abibumpcheck
-build-indep: build-source-stamp
-
 override_dh_auto_install:
 	dh_auto_install --builddirectory=debian/build/main \
 		--destdir=debian/tmp/main
@@ -44,8 +49,7 @@ override_dh_auto_install:
 		--destdir=debian/tmp/udeb
 
 	# oh, yuck.
-	find debian/tmp/*/usr/lib/xorg -type f -name '*.la' | \
-	  xargs rm -f
+	find debian/tmp/*/usr/lib/xorg -type f -name '*.la' -delete
 
 	# remove modules not needed in d-i
 	rm -rf debian/tmp/udeb/usr/lib/xorg/modules/multimedia
@@ -78,7 +82,7 @@ SERVERMINVER = debian/serverminver
 serverminver = $(shell head -1 $(SERVERMINVER))
 
 .PHONY: abibumpcheck
-abibumpcheck: debian/serverminver $(QUILT_STAMPFN)
+abibumpcheck: debian/serverminver
 	@echo Checking for the need of an ABI bump
 	# Build an updated version of the file:
 	head -1 $(SERVERMINVER) > $(SERVERMINVER).new
@@ -102,7 +106,7 @@ override_dh_fixperms-arch:
 
 override_dh_install:
 	dh_install -pxserver-xorg-core-udeb --sourcedir=debian/tmp/udeb
-	dh_install --remaining-packages --sourcedir=debian/tmp/main --fail-missing
+	dh_install --remaining-packages --sourcedir=debian/tmp/main
 	install -d $(CURDIR)/debian/xserver-xorg-dev/usr/share/xserver-xorg
 	# Extract only the major ABI version:
 	set -e; \
@@ -130,6 +134,12 @@ ifeq ($(DEB_HOST_ARCH_OS), linux)
 	install -d debian/xserver-xorg-core-udeb/lib/udev/rules.d
 	install -m 644 debian/local/64-xorg-xkb.rules debian/xserver-xorg-core-udeb/lib/udev/rules.d
 endif
+
+override_dh_missing-indep:
+	dh_missing -i -X udeb/
+
+override_dh_missing-arch:
+	dh_missing --fail-missing
 
 override_dh_clean:
 	dh_clean

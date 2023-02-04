@@ -1,6 +1,6 @@
 DEB_HOST_ARCH_OS ?= $(shell dpkg-architecture -qDEB_HOST_ARCH_OS)
 
-VENDOR = $(shell lsb_release -i -s)
+VENDOR = $(shell dpkg-vendor --query Vendor)
 SUPPORT = https://www.debian.org/support
 
 SOURCE_NAME    :=  xorg-server
@@ -17,6 +17,7 @@ confflags += \
 	--disable-strict-compilation \
 	--disable-debug \
 	--with-int10=x86emu \
+	--with-os-name="$(DEB_HOST_ARCH_OS)" \
 	--with-os-vendor="$(VENDOR)" \
 	--with-builderstring="$(SOURCE_NAME) $(SOURCE_VERSION) ($(SUPPORT))" \
 	--with-xkb-path=/usr/share/X11/xkb \
@@ -25,7 +26,6 @@ confflags += \
 	--enable-mitshm \
 	--enable-xres \
 	--disable-xcsecurity \
-	--disable-tslib \
 	--enable-dbe \
 	--disable-xf86bigfont \
 	--enable-dpms \
@@ -34,8 +34,6 @@ confflags += \
 	--disable-linux-apm \
 	--disable-xquartz \
 	--disable-xwin \
-	--disable-xfake \
-	--disable-xfbdev \
 	--disable-install-setuid
 
 confflags_main = \
