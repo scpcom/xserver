@@ -10,6 +10,7 @@
 ## Ubuntu patches, not upstreamable
 168_glibc_trace_to_stderr.patch
 226_fall_back_to_autoconfiguration.patch
+300-mi-sprite-SaveUnderCursor2.patch
 
 ## send upstream
 xfree86-no-xv-for-gpuscreens.patch
@@ -26,3 +27,15 @@ fix-default-permissions.patch
 reset-transforms-in-closescreen.diff
 randr-auto-bind-of-gpu-is-a-config-change.diff
 fix-gtf-detection-for-edid-14.diff
+CVE-2022-2319-pre1.patch
+CVE-2022-2319.patch
+CVE-2022-2320.patch
+CVE-2022-3550.patch
+CVE-2022-3551.patch
+CVE-2022-46340.patch
+CVE-2022-46341.patch
+CVE-2022-46342.patch
+CVE-2022-46343.patch
+CVE-2022-46344-1.patch
+CVE-2022-46344-2.patch
+CVE-2022-4283.patch

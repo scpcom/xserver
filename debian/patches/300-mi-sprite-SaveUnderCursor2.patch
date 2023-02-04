@@ -1,0 +1,59 @@
+From 905bdb14876be1f01a444f473b0c20c651e169ba Mon Sep 17 00:00:00 2001
+From: Hyun Kwon <hyun.kwon@xilinx.com>
+Date: Mon, 25 Sep 2017 15:42:23 -0700
+Subject: [PATCH] mi: sprite: SaveUnderCursor2
+
+There is cursor bleeding for the devices which try to acclerate the
+Desktop environment using low powered ARM Mali GPUs. The area under
+the cusrsor is not updated for every swap call within the armsoc,
+resulting in the block artifact.
+
+Expose miDCSaveUnderCursor2 API, so that other graphics layer like
+armsoc can inoke and save the area under the cursor before actually
+performing a swap between the backbuffer and the frontbuffer.
+
+Signed-off-by: Hyun Kwon <hyun.kwon@xilinx.com>
+Signed-off-by: Madhurkiran Harikrishnan <madhurkiran.harikrishnan@xilinx.com>
+---
+ mi/mipointer.h |  2 ++
+ mi/misprite.c  | 17 +++++++++++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/mi/mipointer.h b/mi/mipointer.h
+index 7ce6409..107b24f 100644
+--- a/mi/mipointer.h
++++ b/mi/mipointer.h
+@@ -127,4 +127,6 @@ extern _X_EXPORT DevPrivateKeyRec miPointerScreenKeyRec;
+ 
+ #define miPointerScreenKey (&miPointerScreenKeyRec)
+ 
++extern _X_EXPORT void miDCSaveUnderCursor2(ScreenPtr pScreen);
++
+ #endif                          /* MIPOINTER_H */
+diff --git a/mi/misprite.c b/mi/misprite.c
+index add2c55..46ce9f0 100644
+--- a/mi/misprite.c
++++ b/mi/misprite.c
+@@ -955,3 +955,20 @@ miSpriteComputeSaved(DeviceIntPtr pDev, ScreenPtr pScreen)
+     pCursorInfo->saved.x2 = pCursorInfo->saved.x1 + w + wpad * 2;
+     pCursorInfo->saved.y2 = pCursorInfo->saved.y1 + h + hpad * 2;
+ }
++
++void
++miDCSaveUnderCursor2(ScreenPtr pScreen)
++{
++	DeviceIntPtr pDev;
++	miCursorInfoPtr pCursorInfo;
++
++	for (pDev = inputInfo.devices; pDev; pDev = pDev->next) {
++		if (DevHasCursor(pDev)) {
++			pCursorInfo = GetSprite(pDev);
++			if (pCursorInfo && pCursorInfo->isUp
++			    && pCursorInfo->pScreen == pScreen) {
++				miSpriteSaveUnderCursor(pDev, pScreen);
++			}
++		}
++	}
++}
+-- 
+2.7.4
