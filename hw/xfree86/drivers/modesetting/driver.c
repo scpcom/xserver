@@ -2020,6 +2020,14 @@ CloseScreen(ScreenPtr pScreen)
         ms->adaptor = NULL;
     }
 
+    if (ms->drmmode.pageflip) {
+        miPointerScreenPtr PointPriv =
+            dixLookupPrivate(&pScreen->devPrivates, miPointerScreenKey);
+
+        if (PointPriv->spriteFuncs == &drmmode_sprite_funcs)
+            PointPriv->spriteFuncs = ms->SpriteFuncs;        
+    }
+
     if (pScrn->vtSema) {
         LeaveVT(pScrn);
     }
