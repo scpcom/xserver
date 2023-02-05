@@ -1,0 +1,41 @@
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Tue, 29 Nov 2022 13:24:00 +1000
+Subject: Xi: return an error from XI property changes if verification failed
+Origin: https://gitlab.freedesktop.org/xorg/xserver/commit/40f431de8a76f737c68ae659fee8472583f15e49
+
+Both ProcXChangeDeviceProperty and ProcXIChangeProperty checked the
+property for validity but didn't actually return the potential error.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+Acked-by: Olivier Fourdan <ofourdan@redhat.com>
+(cherry picked from commit b8a84cb0f2807b07ab70ca9915fcdee21301b8ca)
+---
+ Xi/xiproperty.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/Xi/xiproperty.c b/Xi/xiproperty.c
+index a36f7d61dfb0..68c362c6287f 100644
+--- a/Xi/xiproperty.c
++++ b/Xi/xiproperty.c
+@@ -902,6 +902,8 @@ ProcXChangeDeviceProperty(ClientPtr client)
+ 
+     rc = check_change_property(client, stuff->property, stuff->type,
+                                stuff->format, stuff->mode, stuff->nUnits);
++    if (rc != Success)
++        return rc;
+ 
+     len = stuff->nUnits;
+     if (len > (bytes_to_int32(0xffffffff - sizeof(xChangeDevicePropertyReq))))
+@@ -1141,6 +1143,9 @@ ProcXIChangeProperty(ClientPtr client)
+ 
+     rc = check_change_property(client, stuff->property, stuff->type,
+                                stuff->format, stuff->mode, stuff->num_items);
++    if (rc != Success)
++        return rc;
++
+     len = stuff->num_items;
+     if (len > bytes_to_int32(0xffffffff - sizeof(xXIChangePropertyReq)))
+         return BadLength;
+-- 
+2.39.0
+

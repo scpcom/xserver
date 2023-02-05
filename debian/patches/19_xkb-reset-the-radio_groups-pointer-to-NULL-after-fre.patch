@@ -1,0 +1,38 @@
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Mon, 5 Dec 2022 15:55:54 +1000
+Subject: xkb: reset the radio_groups pointer to NULL after freeing it
+Origin: https://gitlab.freedesktop.org/xorg/xserver/commit/e860bbce4fdb169e84033529331ae2666e679de7
+Bug-Debian-Security: https://security-tracker.debian.org/tracker/CVE-2022-4283
+Bug-Debian: https://bugs.debian.org/1026071
+
+Unlike other elements of the keymap, this pointer was freed but not
+reset. On a subsequent XkbGetKbdByName request, the server may access
+already freed memory.
+
+CVE-2022-4283, ZDI-CAN-19530
+
+This vulnerability was discovered by:
+Jan-Niklas Sohn working with Trend Micro Zero Day Initiative
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+Acked-by: Olivier Fourdan <ofourdan@redhat.com>
+(cherry picked from commit ccdd431cd8f1cabae9d744f0514b6533c438908c)
+---
+ xkb/xkbUtils.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xkb/xkbUtils.c b/xkb/xkbUtils.c
+index 8975ade8dde1..9bc51fc714bf 100644
+--- a/xkb/xkbUtils.c
++++ b/xkb/xkbUtils.c
+@@ -1327,6 +1327,7 @@ _XkbCopyNames(XkbDescPtr src, XkbDescPtr dst)
+         }
+         else {
+             free(dst->names->radio_groups);
++            dst->names->radio_groups = NULL;
+         }
+         dst->names->num_rg = src->names->num_rg;
+ 
+-- 
+2.39.0
+
