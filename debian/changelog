@@ -1,3 +1,9 @@
+xorg-server (2:1.20.14-1+deb11u4) bullseye-security; urgency=medium
+
+  * Update bullseye-security release.
+
+ -- scpcom <scpcom@gmx.de>  Sat, 04 Feb 2023 23:37:52 +0100
+
 xorg-server (2:1.20.14-1+deb11u3) bullseye-security; urgency=medium
 
   * Update bullseye-security release.
@@ -32,6 +38,25 @@ xorg-server (2:1.20.13-1) experimental; urgency=medium
   * New upstream release.
 
  -- Timo Aaltonen <tjaalton@debian.org>  Tue, 10 Aug 2021 12:27:00 +0300
+
+xorg-server (2:1.20.11-1+deb11u4) bullseye-security; urgency=high
+
+  * Non-maintainer upload by the Security Team.
+  * Xtest: disallow GenericEvents in XTestSwapFakeInput (CVE-2022-46340)
+    (Closes: #1026071)
+  * Xi: disallow passive grabs with a detail > 255 (CVE-2022-46341)
+    (Closes: #1026071)
+  * Xext: free the XvRTVideoNotify when turning off from the same client
+    (CVE-2022-46342) (Closes: #1026071)
+  * Xext: free the screen saver resource when replacing it (CVE-2022-46343)
+    (Closes: #1026071)
+  * Xi: return an error from XI property changes if verification failed
+  * Xi: avoid integer truncation in length check of ProcXIChangeProperty
+    (CVE-2022-46344) (Closes: #1026071)
+  * xkb: reset the radio_groups pointer to NULL after freeing it
+    (CVE-2022-4283) (Closes: #1026071)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Sat, 17 Dec 2022 11:00:08 +0100
 
 xorg-server (2:1.20.11-1+deb11u3) bullseye-security; urgency=medium
 
