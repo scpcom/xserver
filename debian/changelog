@@ -1,3 +1,9 @@
+xorg-server (2:1.20.14-1ubuntu9+rockchip4) UNRELEASED; urgency=medium
+
+  * Disable gbm bo with modifiers
+
+ -- builder <builder@host.local>  Sun, 26 Feb 2023 05:45:33 +0100
+
 xorg-server (2:1.20.14-1ubuntu9~20.04.5) focal; urgency=medium
 
   * Backport to focal.

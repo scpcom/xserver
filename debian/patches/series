@@ -39,3 +39,4 @@ CVE-2022-46343.patch
 CVE-2022-46344-1.patch
 CVE-2022-46344-2.patch
 CVE-2022-4283.patch
+configure-disable-gbm_bo_with_modifiers.patch
