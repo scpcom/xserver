@@ -66,6 +66,7 @@ static Bool drmmode_xf86crtc_resize(ScrnInfoPtr scrn, int width, int height);
 static void drmmode_destroy_flip_fb(xf86CrtcPtr crtc);
 static Bool drmmode_create_flip_fb(xf86CrtcPtr crtc);
 static Bool drmmode_apply_transform(xf86CrtcPtr crtc);
+static Bool drmmode_update_fb(xf86CrtcPtr crtc);
 
 static inline uint32_t *
 formats_ptr(struct drm_format_modifier_blob *blob)
@@ -610,6 +611,7 @@ drmmode_crtc_get_fb_id(xf86CrtcPtr crtc, uint32_t *fb_id, int *x, int *y)
 {
     drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
     drmmode_ptr drmmode = drmmode_crtc->drmmode;
+    ScreenPtr screen = xf86ScrnToScreen(drmmode->scrn);
     int ret;
 
     *fb_id = 0;
@@ -626,6 +628,10 @@ drmmode_crtc_get_fb_id(xf86CrtcPtr crtc, uint32_t *fb_id, int *x, int *y)
     }
     else if (drmmode_crtc->rotate_fb_id) {
         *fb_id = drmmode_crtc->rotate_fb_id;
+        *x = *y = 0;
+    }
+    else if (!screen->isGPU && drmmode_crtc->flip_fb_enabled) {
+        *fb_id = drmmode_crtc->flip_fb[drmmode_crtc->current_fb].fb_id;
         *x = *y = 0;
     } else {
         *fb_id = drmmode->fb_id;
@@ -4536,7 +4542,7 @@ drmmode_transform_region(xf86CrtcPtr crtc, RegionPtr src)
 }
 
 static Bool
-drmmode_update_fb(xf86CrtcPtr crtc, drmmode_fb *fb)
+drmmode_update_fb(xf86CrtcPtr crtc)
 {
     drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
     ScrnInfoPtr scrn = crtc->scrn;
@@ -4544,7 +4550,10 @@ drmmode_update_fb(xf86CrtcPtr crtc, drmmode_fb *fb)
     ScreenPtr screen = xf86ScrnToScreen(scrn);
     SourceValidateProcPtr SourceValidate = screen->SourceValidate;
     RegionPtr dirty;
+    drmmode_fb *fb;
     Bool ret;
+
+    fb = &drmmode_crtc->flip_fb[drmmode_crtc->current_fb];
 
     if (!fb->pixmap) {
         void *data = drmmode_bo_map(&ms->drmmode, &fb->bo);
@@ -4638,8 +4647,6 @@ drmmode_flip_fb(xf86CrtcPtr crtc, int *timeout)
     ScreenPtr screen = xf86ScrnToScreen(drmmode->scrn);
     drmmode_fb *fb;
     struct timeval tv;
-    uint64_t now_ms, target_ms;
-    int next_fb;
 
     if (!drmmode_crtc || !crtc->active || !drmmode_crtc_connected(crtc) ||
         drmmode_crtc->dpms_mode != DPMSModeOn || drmmode_crtc->rotate_fb_id)
@@ -4648,24 +4655,22 @@ drmmode_flip_fb(xf86CrtcPtr crtc, int *timeout)
     if (!drmmode_crtc->flip_fb_enabled)
         return TRUE;
 
-    gettimeofday(&tv, NULL);
-    now_ms = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (drmmode->dri2_flipping || drmmode->present_flipping)
+        return TRUE;
 
-    target_ms = drmmode_crtc->flipping_time_ms;
+    /* merge update requests when still flipping */
+    if (drmmode_crtc->flipping) {
+        uint64_t now_ms;
 
-    if (drmmode_crtc->external_flipped)
-        /* idle from external flip */
-        target_ms += 100;
-    else if (drmmode_crtc->flipping)
-        /* handle flip timeout */
-        target_ms += 50;
-    else if (drmmode->fb_flip_rate)
-        /* limit flip rate */
-        target_ms += 1000 / drmmode->fb_flip_rate;
+        gettimeofday(&tv, NULL);
+        now_ms = tv.tv_sec * 1000 + tv.tv_usec / 1000;
 
-    /* merge update requests */
-    if (now_ms < target_ms)
-        goto retry;
+        if (now_ms - drmmode_crtc->flipping_time_ms < 50) {
+            if (*timeout)
+                *timeout = 3;
+            return TRUE;
+        }
+    }
 
     fb = &drmmode_crtc->flip_fb[drmmode_crtc->current_fb];
 
@@ -4685,36 +4690,19 @@ drmmode_flip_fb(xf86CrtcPtr crtc, int *timeout)
         }
     }
 
-    next_fb = drmmode_crtc->current_fb + 1;
-    next_fb %= ARRAY_SIZE(drmmode_crtc->flip_fb);
-    fb = &drmmode_crtc->flip_fb[next_fb];
+    drmmode_crtc->current_fb++;
+    drmmode_crtc->current_fb %= ARRAY_SIZE(drmmode_crtc->flip_fb);
 
-    if (!drmmode_update_fb(crtc, fb))
+    if (!drmmode_update_fb(crtc))
         return FALSE;
 
-    /* retry later if still flipping */
-    if (drmmode_crtc->flipping ||
-        drmmode->dri2_flipping || drmmode->present_flipping)
-        goto retry;
-
+    fb = &drmmode_crtc->flip_fb[drmmode_crtc->current_fb];
     if (!ms_do_pageflip_bo(screen, &fb->bo, drmmode_crtc,
-                           drmmode_crtc->vblank_pipe, crtc, TRUE,
-                           drmmode_flip_fb_handler, drmmode_flip_fb_abort)) {
-        /* HACK: Workaround commit random interrupted case */
-        if (errno != EPERM)
-            return FALSE;
-    }
+                           drmmode_crtc->vblank_pipe, TRUE,
+                           drmmode_flip_fb_handler, drmmode_flip_fb_abort))
+        return FALSE;
 
-    /* take out FB syncing time from framerate control */
-    drmmode_crtc->flipping_time_ms = now_ms;
-    drmmode_crtc->external_flipped = FALSE;
+    drmmode_crtc->flipping = TRUE;
 
-    drmmode_crtc->current_fb = next_fb;
-
-    return TRUE;
-
-retry:
-    if (*timeout)
-        *timeout = 3;
     return TRUE;
 }

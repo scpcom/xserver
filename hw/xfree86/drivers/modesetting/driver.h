@@ -54,7 +54,6 @@ typedef enum {
     OPTION_DOUBLE_SHADOW,
     OPTION_ATOMIC,
     OPTION_FLIP_FB,
-    OPTION_FLIP_FB_RATE,
     OPTION_NO_EDID,
     OPTION_HOTPLUG_RESET,
 } modesettingOpts;
@@ -182,7 +181,6 @@ Bool ms_do_pageflip_bo(ScreenPtr screen,
                        drmmode_bo *new_front_bo,
                        void *event,
                        int ref_crtc_vblank_pipe,
-                       xf86CrtcPtr target_crtc,
                        Bool async,
                        ms_pageflip_handler_proc pageflip_handler,
                        ms_pageflip_abort_proc pageflip_abort);
