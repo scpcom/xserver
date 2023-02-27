@@ -1,3 +1,9 @@
+xorg-server (2:1.20.14-1+rockchip4) UNRELEASED; urgency=medium
+
+  * Disable gbm bo with modifiers
+
+ -- builder <builder@host.local>  Mon, 27 Feb 2023 17:46:56 +0100
+
 xorg-server (2:1.20.14-1+deb11u4) bullseye-security; urgency=medium
 
   * Update bullseye-security release.

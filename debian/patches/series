@@ -19,3 +19,4 @@
 17_Xi-return-an-error-from-XI-property-changes-if-verif.patch
 18_Xi-avoid-integer-truncation-in-length-check-of-ProcX.patch
 19_xkb-reset-the-radio_groups-pointer-to-NULL-after-fre.patch
+configure-disable-gbm_bo_with_modifiers.patch
