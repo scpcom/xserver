@@ -1,5 +1,6 @@
 /*
  * Copyright 2008 Tungsten Graphics, Inc., Cedar Park, Texas.
+ * Copyright 2019 NVIDIA CORPORATION
  * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,7 +25,8 @@
  *
  *
  * Author: Alan Hourihane <alanh@tungstengraphics.com>
- *
+ * Additional contributors:
+ *   Aaron Plattner <aplattner@nvidia.com>
  */
 
 #include <errno.h>
@@ -34,7 +36,7 @@
 #include <xf86Crtc.h>
 #include <damage.h>
 #include <X11/extensions/dpmsconst.h>
-
+#include <shadow.h>
 #ifdef GLAMOR_HAS_GBM
 #define GLAMOR_FOR_XORG 1
 #include "glamor.h"
@@ -43,6 +45,10 @@
 
 #include "drmmode_display.h"
 #define MS_LOGLEVEL_DEBUG 4
+
+struct ms_vrr_priv {
+    Bool variable_refresh;
+};
 
 typedef enum {
     OPTION_SW_CURSOR,
@@ -130,6 +136,8 @@ typedef struct _modesettingRec {
     XF86VideoAdaptorPtr adaptor;
 } modesettingRec, *modesettingPtr;
 
+#define glamor_finish(screen) ms->glamor.finish(screen)
+
 #define modesettingPTR(p) ((modesettingPtr)((p)->driverPrivate))
 modesettingEntPtr ms_ent_priv(ScrnInfoPtr scrn);
 
@@ -191,7 +199,8 @@ Bool ms_do_pageflip(ScreenPtr screen,
                     int ref_crtc_vblank_pipe,
                     Bool async,
                     ms_pageflip_handler_proc pageflip_handler,
-                    ms_pageflip_abort_proc pageflip_abort);
+                    ms_pageflip_abort_proc pageflip_abort,
+                    const char *log_prefix);
 
 int ms_flush_drm_events(ScreenPtr screen);
 

@@ -187,6 +187,7 @@ fs_location_vars(glamor_program_location locations)
 
 static const char vs_template[] =
     "%s"                                /* version */
+    "%s"                                /* exts */
     "%s"                                /* defines */
     "%s"                                /* prim vs_vars */
     "%s"                                /* fill vs_vars */
@@ -260,10 +261,11 @@ glamor_build_program(ScreenPtr          screen,
     char                        *fs_vars = NULL;
     char                        *vs_vars = NULL;
 
-    char                        *vs_prog_string;
-    char                        *fs_prog_string;
+    char                        *vs_prog_string = NULL;
+    char                        *fs_prog_string = NULL;
 
     GLint                       fs_prog, vs_prog;
+    Bool                        gpu_shader4 = FALSE;
 
     if (!fill)
         fill = &facet_null_fill;
@@ -272,8 +274,14 @@ glamor_build_program(ScreenPtr          screen,
     flags |= fill->flags;
     version = MAX(version, fill->version);
 
-    if (version > glamor_priv->glsl_version)
-        goto fail;
+    if (version > glamor_priv->glsl_version) {
+        if (version == 130 && !glamor_priv->use_gpu_shader4)
+            goto fail;
+        else {
+            version = 120;
+            gpu_shader4 = TRUE;
+        }
+    }
 
     vs_vars = vs_location_vars(locations);
     fs_vars = fs_location_vars(locations);
@@ -293,6 +301,7 @@ glamor_build_program(ScreenPtr          screen,
     if (asprintf(&vs_prog_string,
                  vs_template,
                  str(version_string),
+                 gpu_shader4 ? "#extension GL_EXT_gpu_shader4 : require\n" : "",
                  str(defines),
                  str(prim->vs_vars),
                  str(fill->vs_vars),
@@ -376,6 +385,8 @@ fail:
         glDeleteProgram(prog->prog);
         prog->prog = 0;
     }
+    free(vs_prog_string);
+    free(fs_prog_string);
     free(version_string);
     free(fs_vars);
     free(vs_vars);

@@ -414,7 +414,7 @@ XIResetProperties(void)
  * @param val The property value
  * @param nelem_return The maximum number of elements to return.
  * @param buf_return Pointer to an array of at least @nelem_return values.
- * @return Success or the error code if an error occured.
+ * @return Success or the error code if an error occurred.
  */
 _X_EXPORT int
 XIPropToInt(XIPropertyValuePtr val, int *nelem_return, int **buf_return)
@@ -484,7 +484,7 @@ XIPropToInt(XIPropertyValuePtr val, int *nelem_return, int **buf_return)
  * @param val The property value
  * @param nelem_return The maximum number of elements to return.
  * @param buf_return Pointer to an array of at least @nelem_return values.
- * @return Success or the error code if an error occured.
+ * @return Success or the error code if an error occurred.
  */
 _X_EXPORT int
 XIPropToFloat(XIPropertyValuePtr val, int *nelem_return, float **buf_return)
@@ -521,7 +521,7 @@ XIPropToFloat(XIPropertyValuePtr val, int *nelem_return, float **buf_return)
 /* Registers a new property handler on the given device and returns a unique
  * identifier for this handler. This identifier is required to unregister the
  * property handler again.
- * @return The handler's identifier or 0 if an error occured.
+ * @return The handler's identifier or 0 if an error occurred.
  */
 long
 XIRegisterPropertyHandler(DeviceIntPtr dev,
@@ -890,7 +890,7 @@ ProcXChangeDeviceProperty(ClientPtr client)
     REQUEST(xChangeDevicePropertyReq);
     DeviceIntPtr dev;
     unsigned long len;
-    int totalSize;
+    uint64_t totalSize;
     int rc;
 
     REQUEST_AT_LEAST_SIZE(xChangeDevicePropertyReq);
@@ -902,6 +902,8 @@ ProcXChangeDeviceProperty(ClientPtr client)
 
     rc = check_change_property(client, stuff->property, stuff->type,
                                stuff->format, stuff->mode, stuff->nUnits);
+    if (rc != Success)
+        return rc;
 
     len = stuff->nUnits;
     if (len > (bytes_to_int32(0xffffffff - sizeof(xChangeDevicePropertyReq))))
@@ -1128,7 +1130,7 @@ ProcXIChangeProperty(ClientPtr client)
 {
     int rc;
     DeviceIntPtr dev;
-    int totalSize;
+    uint64_t totalSize;
     unsigned long len;
 
     REQUEST(xXIChangePropertyReq);
@@ -1141,6 +1143,9 @@ ProcXIChangeProperty(ClientPtr client)
 
     rc = check_change_property(client, stuff->property, stuff->type,
                                stuff->format, stuff->mode, stuff->num_items);
+    if (rc != Success)
+        return rc;
+
     len = stuff->num_items;
     if (len > bytes_to_int32(0xffffffff - sizeof(xXIChangePropertyReq)))
         return BadLength;

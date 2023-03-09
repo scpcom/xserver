@@ -366,7 +366,7 @@ ScreenSaverFreeSuspend(void *value, XID id)
         }
     }
 
-    /* Reenable the screensaver if this was the last client suspending it. */
+    /* Re-enable the screensaver if this was the last client suspending it. */
     if (screenSaverSuspended && suspendingClients == NULL) {
         screenSaverSuspended = FALSE;
 
@@ -1051,7 +1051,7 @@ ScreenSaverSetAttributes(ClientPtr client)
         pVlist++;
     }
     if (pPriv->attr)
-        FreeScreenAttr(pPriv->attr);
+        FreeResource(pPriv->attr->resource, AttrType);
     pPriv->attr = pAttr;
     pAttr->resource = FakeClientID(client->index);
     if (!AddResource(pAttr->resource, AttrType, (void *) pAttr))
@@ -1243,7 +1243,7 @@ ProcScreenSaverSuspend(ClientPtr client)
     /*
      * Allocate a suspension record for the client, and stop the screensaver
      * if it isn't already suspended by another client. We attach a resource ID
-     * to the record, so the screensaver will be reenabled and the record freed
+     * to the record, so the screensaver will be re-enabled and the record freed
      * if the client disconnects without reenabling it first.
      */
     this = malloc(sizeof(ScreenSaverSuspensionRec));

@@ -79,6 +79,8 @@ SOFTWARE.
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <sys/stat.h>
+
 #ifndef WIN32
 #include <sys/socket.h>
 
@@ -116,11 +118,14 @@ SOFTWARE.
 #define zoneid_t int
 #endif
 
+#ifdef HAVE_SYSTEMD_DAEMON
+#include <systemd/sd-daemon.h>
+#endif
+
 #include "probes.h"
 
 struct ospoll   *server_poll;
 
-int MaxClients = 0;
 Bool NewOutputPending;          /* not yet attempted to write some new output */
 Bool NoListenAll;               /* Don't establish any listening sockets */
 
@@ -134,7 +139,7 @@ static Pid_t ParentProcess;
 int GrabInProgress = 0;
 
 static void
-QueueNewConnections(int curconn, int ready, void *data);
+EstablishNewConnections(int curconn, int ready, void *data);
 
 static void
 set_poll_client(ClientPtr client);
@@ -160,18 +165,6 @@ lookup_trans_conn(int fd)
     }
 
     return NULL;
-}
-
-/* Set MaxClients */
-
-void
-InitConnectionLimits(void)
-{
-    MaxClients = MAXCLIENTS;
-
-#ifdef DEBUG
-    ErrorF("InitConnectionLimits: MaxClients = %d\n", MaxClients);
-#endif
 }
 
 /*
@@ -220,6 +213,11 @@ NotifyParentProcess(void)
     }
     if (RunFromSigStopParent)
         raise(SIGSTOP);
+#ifdef HAVE_SYSTEMD_DAEMON
+    /* If we have been started as a systemd service, tell systemd that
+       we are ready. Otherwise sd_notify() won't do anything. */
+    sd_notify(0, "READY=1");
+#endif
 #endif
 }
 
@@ -283,7 +281,7 @@ CreateWellKnownSockets(void)
         int fd = _XSERVTransGetConnectionNumber(ListenTransConns[i]);
 
         ListenTransFds[i] = fd;
-        SetNotifyFd(fd, QueueNewConnections, X_NOTIFY_READ, NULL);
+        SetNotifyFd(fd, EstablishNewConnections, X_NOTIFY_READ, NULL);
 
         if (!_XSERVTransIsLocal(ListenTransConns[i]))
             DefineSelf (fd);
@@ -343,7 +341,8 @@ ResetWellKnownSockets(void)
         }
     }
     for (i = 0; i < ListenTransCount; i++)
-        SetNotifyFd(ListenTransFds[i], QueueNewConnections, X_NOTIFY_READ, NULL);
+        SetNotifyFd(ListenTransFds[i], EstablishNewConnections, X_NOTIFY_READ,
+                    NULL);
 
     ResetAuthorization();
     ResetHosts(display);
@@ -638,8 +637,8 @@ AllocNewConnection(XtransConnInfo trans_conn, int fd, CARD32 conn_time)
     set_poll_client(client);
 
 #ifdef DEBUG
-    ErrorF("AllocNewConnection: client index = %d, socket fd = %d\n",
-           client->index, fd);
+    ErrorF("AllocNewConnection: client index = %d, socket fd = %d, local = %d\n",
+           client->index, fd, client->local);
 #endif
 #ifdef XSERVER_DTRACE
     XSERVER_CLIENT_CONNECT(client->index, fd);
@@ -650,15 +649,13 @@ AllocNewConnection(XtransConnInfo trans_conn, int fd, CARD32 conn_time)
 
 /*****************
  * EstablishNewConnections
- *    If anyone is waiting on listened sockets, accept them.
- *    Returns a mask with indices of new clients.  Updates AllClients
- *    and AllSockets.
+ *    If anyone is waiting on listened sockets, accept them. Drop pending
+ *    connections if they've stuck around for more than one minute.
  *****************/
-
-static Bool
-EstablishNewConnections(ClientPtr clientUnused, void *closure)
+#define TimeOutValue 60 * MILLI_PER_SECOND
+static void
+EstablishNewConnections(int curconn, int ready, void *data)
 {
-    int curconn = (int) (intptr_t) closure;
     int newconn;       /* fd of new client */
     CARD32 connect_time;
     int i;
@@ -680,10 +677,10 @@ EstablishNewConnections(ClientPtr clientUnused, void *closure)
     }
 
     if ((trans_conn = lookup_trans_conn(curconn)) == NULL)
-        return TRUE;
+        return;
 
     if ((new_trans_conn = _XSERVTransAccept(trans_conn, &status)) == NULL)
-        return TRUE;
+        return;
 
     newconn = _XSERVTransGetConnectionNumber(new_trans_conn);
 
@@ -695,13 +692,7 @@ EstablishNewConnections(ClientPtr clientUnused, void *closure)
     if (!AllocNewConnection(new_trans_conn, newconn, connect_time)) {
         ErrorConnMax(new_trans_conn);
     }
-    return TRUE;
-}
-
-static void
-QueueNewConnections(int fd, int ready, void *data)
-{
-    QueueWorkProc(EstablishNewConnections, NULL, (void *) (intptr_t) fd);
+    return;
 }
 
 #define NOROOM "Maximum number of clients reached"
@@ -906,7 +897,7 @@ ListenToAllClients(void)
 /****************
  * IgnoreClient
  *    Removes one client from input masks.
- *    Must have cooresponding call to AttendClient.
+ *    Must have corresponding call to AttendClient.
  ****************/
 
 void
@@ -1000,15 +991,34 @@ MakeClientGrabPervious(ClientPtr client)
 void
 ListenOnOpenFD(int fd, int noxauth)
 {
-    char port[256];
+    char port[PATH_MAX];
     XtransConnInfo ciptr;
     const char *display_env = getenv("DISPLAY");
 
-    if (display_env && (strncmp(display_env, "/tmp/launch", 11) == 0)) {
-        /* Make the path the launchd socket if our DISPLAY is set right */
-        strcpy(port, display_env);
+    /* First check if display_env matches a <absolute path to unix socket>[.<screen number>] scheme (eg: launchd) */
+    if (display_env && display_env[0] == '/') {
+        struct stat sbuf;
+
+        strlcpy(port, display_env, sizeof(port));
+
+        /* If the path exists, we don't have do do anything else.
+         * If it doesn't, we need to check for a .<screen number> to strip off and recheck.
+         */
+        if (0 != stat(port, &sbuf)) {
+            char *dot = strrchr(port, '.');
+            if (dot) {
+                *dot = '\0';
+
+                if (0 != stat(port, &sbuf)) {
+                    display_env = NULL;
+                }
+            } else {
+                display_env = NULL;
+            }
+        }
     }
-    else {
+
+    if (!display_env) {
         /* Just some default so things don't break and die. */
         snprintf(port, sizeof(port), ":%d", atoi(display));
     }
@@ -1036,7 +1046,7 @@ ListenOnOpenFD(int fd, int noxauth)
     ListenTransConns[ListenTransCount] = ciptr;
     ListenTransFds[ListenTransCount] = fd;
 
-    SetNotifyFd(fd, QueueNewConnections, X_NOTIFY_READ, NULL);
+    SetNotifyFd(fd, EstablishNewConnections, X_NOTIFY_READ, NULL);
 
     /* Increment the count */
     ListenTransCount++;

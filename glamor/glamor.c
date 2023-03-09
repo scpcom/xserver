@@ -135,13 +135,15 @@ glamor_clear_pixmap(PixmapPtr pixmap)
     ScreenPtr screen = pixmap->drawable.pScreen;
     glamor_screen_private *glamor_priv;
     glamor_pixmap_private *pixmap_priv;
+    const struct glamor_format *pixmap_format;
 
     glamor_priv = glamor_get_screen_private(screen);
     pixmap_priv = glamor_get_pixmap_private(pixmap);
+    pixmap_format = glamor_format_for_pixmap(pixmap);
 
     assert(pixmap_priv->fbo != NULL);
 
-    glamor_pixmap_clear_fbo(glamor_priv, pixmap_priv->fbo);
+    glamor_pixmap_clear_fbo(glamor_priv, pixmap_priv->fbo, pixmap_format);
 }
 
 uint32_t
@@ -425,6 +427,7 @@ glamor_debug_output_callback(GLenum source,
 
     LogMessageVerb(X_ERROR, 0, "glamor%d: GL error: %*s\n",
                screen->myNum, length, message);
+    xorg_backtrace();
 }
 
 /**
@@ -434,7 +437,8 @@ glamor_debug_output_callback(GLenum source,
 static void
 glamor_setup_debug_output(ScreenPtr screen)
 {
-    if (!epoxy_has_gl_extension("GL_ARB_debug_output"))
+    if (!epoxy_has_gl_extension("GL_KHR_debug") &&
+        !epoxy_has_gl_extension("GL_ARB_debug_output"))
         return;
 
     glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -755,7 +759,7 @@ glamor_init(ScreenPtr screen, unsigned int flags)
          * have instanced arrays, but this is not always the case.
          * etnaviv offers GLSL 140 with OpenGL 2.1.
          */
-        if (glamor_priv->glsl_version >= 130 &&
+        if (glamor_glsl_has_ints(glamor_priv) &&
             !epoxy_has_gl_extension("GL_ARB_instanced_arrays"))
                 glamor_priv->glsl_version = 120;
     } else {
@@ -780,6 +784,10 @@ glamor_init(ScreenPtr screen, unsigned int flags)
         ErrorF("GL_{ARB,OES}_vertex_array_object required\n");
         goto fail;
     }
+
+    if (!glamor_priv->is_gles && glamor_priv->glsl_version == 120 &&
+        epoxy_has_gl_extension("GL_ARB_instanced_arrays"))
+        glamor_priv->use_gpu_shader4 = epoxy_has_gl_extension("GL_EXT_gpu_shader4");
 
     glamor_priv->has_rw_pbo = FALSE;
     if (!glamor_priv->is_gles)
@@ -808,8 +816,11 @@ glamor_init(ScreenPtr screen, unsigned int flags)
         epoxy_gl_version() >= 30 ||
         epoxy_has_gl_extension("GL_NV_pack_subimage");
     glamor_priv->has_dual_blend =
-        glamor_priv->glsl_version >= 130 &&
+        glamor_glsl_has_ints(glamor_priv) &&
         epoxy_has_gl_extension("GL_ARB_blend_func_extended");
+    glamor_priv->has_clear_texture =
+        epoxy_gl_version() >= 44 ||
+        epoxy_has_gl_extension("GL_ARB_clear_texture");
 
     glamor_priv->can_copyplane = (gl_version >= 30);
 
@@ -1080,7 +1091,7 @@ glamor_shareable_fd_from_pixmap(ScreenPtr screen,
     int ret;
 
     /*
-     * The actual difference between a sharable and non sharable buffer
+     * The actual difference between a shareable and non-shareable buffer
      * is decided 4 call levels deep in glamor_make_pixmap_exportable()
      * based on pixmap->usage_hint == CREATE_PIXMAP_USAGE_SHARED
      * 2 of those calls are also exported API, so we cannot just add a flag.

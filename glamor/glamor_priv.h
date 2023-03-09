@@ -218,9 +218,11 @@ typedef struct glamor_screen_private {
     Bool has_rw_pbo;
     Bool use_quads;
     Bool has_dual_blend;
+    Bool has_clear_texture;
     Bool has_texture_swizzle;
     Bool is_core_profile;
     Bool can_copyplane;
+    Bool use_gpu_shader4;
     int max_fbo_size;
     Bool gl_synced;
 
@@ -567,7 +569,10 @@ void glamor_destroy_fbo(glamor_screen_private *glamor_priv,
                         glamor_pixmap_fbo *fbo);
 void glamor_pixmap_destroy_fbo(PixmapPtr pixmap);
 Bool glamor_pixmap_fbo_fixup(ScreenPtr screen, PixmapPtr pixmap);
-void glamor_pixmap_clear_fbo(glamor_screen_private *glamor_priv, glamor_pixmap_fbo *fbo);
+void glamor_pixmap_clear_fbo(glamor_screen_private *glamor_priv, glamor_pixmap_fbo *fbo,
+                             const struct glamor_format *pixmap_format);
+
+const struct glamor_format *glamor_format_for_pixmap(PixmapPtr pixmap);
 
 const struct glamor_format *glamor_format_for_pixmap(PixmapPtr pixmap);
 

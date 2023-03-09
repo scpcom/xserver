@@ -94,7 +94,6 @@ SOFTWARE.
 #include <X11/X.h>
 #include <X11/Xproto.h>
 #include "misc.h"
-#include "site.h"
 #include <errno.h>
 #include <sys/types.h>
 #ifndef WIN32
@@ -115,6 +114,10 @@ SOFTWARE.
 #ifdef __sun
 #include <zone.h>
 #endif
+#endif
+
+#ifdef HAVE_SYS_UN_H
+#include <sys/un.h>
 #endif
 
 #if defined(SVR4) ||  (defined(SYSV) && defined(__i386__)) || defined(__GNU__)
@@ -228,7 +231,7 @@ typedef struct _host {
 #define FreeHost(h)	free(h)
 static HOST *selfhosts = NULL;
 static HOST *validhosts = NULL;
-static int AccessEnabled = DEFAULT_ACCESS_CONTROL;
+static int AccessEnabled = TRUE;
 static int LocalHostEnabled = FALSE;
 static int LocalHostRequested = FALSE;
 static int UsingXdmcp = FALSE;
@@ -582,7 +585,7 @@ static void
 in6_fillscopeid(struct sockaddr_in6 *sin6)
 {
 #if defined(__KAME__)
-    if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr)) {
+    if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr) && sin6->sin6_scope_id == 0) {
         sin6->sin6_scope_id =
             ntohs(*(u_int16_t *) &sin6->sin6_addr.s6_addr[2]);
         sin6->sin6_addr.s6_addr[2] = sin6->sin6_addr.s6_addr[3] = 0;
@@ -921,7 +924,7 @@ AddLocalHosts(void)
         /* Fix for XFree86 bug #156: pass addingLocal = TRUE to
          * NewHost to tell that we are adding the default local
          * host entries and not to flag the entries as being
-         * explicitely requested */
+         * explicitly requested */
         (void) NewHost(self->family, self->addr, self->len, TRUE);
 }
 
@@ -951,7 +954,7 @@ ResetHosts(const char *display)
     int len;
 
     siTypesInitialize();
-    AccessEnabled = defeatAccessControl ? FALSE : DEFAULT_ACCESS_CONTROL;
+    AccessEnabled = !defeatAccessControl;
     LocalHostEnabled = FALSE;
     while ((host = validhosts) != 0) {
         validhosts = host->next;
@@ -1168,15 +1171,19 @@ GetLocalClientCreds(ClientPtr client, LocalClientCredRec ** lccp)
     XtransConnInfo ci;
     LocalClientCredRec *lcc;
 
-#ifdef HAVE_GETPEEREID
-    uid_t uid;
-    gid_t gid;
-#elif defined(HAVE_GETPEERUCRED)
+#if defined(HAVE_GETPEERUCRED)
     ucred_t *peercred = NULL;
     const gid_t *gids;
 #elif defined(SO_PEERCRED)
     struct ucred peercred;
     socklen_t so_len = sizeof(peercred);
+#elif defined(HAVE_GETPEEREID)
+    uid_t uid;
+    gid_t gid;
+#if defined(LOCAL_PEERPID)
+    pid_t pid;
+    socklen_t so_len = sizeof(pid);
+#endif
 #endif
 
     if (client == NULL)
@@ -1198,16 +1205,7 @@ GetLocalClientCreds(ClientPtr client, LocalClientCredRec ** lccp)
     lcc = *lccp;
 
     fd = _XSERVTransGetConnectionNumber(ci);
-#ifdef HAVE_GETPEEREID
-    if (getpeereid(fd, &uid, &gid) == -1) {
-        FreeLocalClientCreds(lcc);
-        return -1;
-    }
-    lcc->euid = uid;
-    lcc->egid = gid;
-    lcc->fieldsSet = LCC_UID_SET | LCC_GID_SET;
-    return 0;
-#elif defined(HAVE_GETPEERUCRED)
+#if defined(HAVE_GETPEERUCRED)
     if (getpeerucred(fd, &peercred) < 0) {
         FreeLocalClientCreds(lcc);
         return -1;
@@ -1254,6 +1252,25 @@ GetLocalClientCreds(ClientPtr client, LocalClientCredRec ** lccp)
     lcc->egid = peercred.gid;
     lcc->pid = peercred.pid;
     lcc->fieldsSet = LCC_UID_SET | LCC_GID_SET | LCC_PID_SET;
+    return 0;
+#elif defined(HAVE_GETPEEREID)
+    if (getpeereid(fd, &uid, &gid) == -1) {
+        FreeLocalClientCreds(lcc);
+        return -1;
+    }
+    lcc->euid = uid;
+    lcc->egid = gid;
+    lcc->fieldsSet = LCC_UID_SET | LCC_GID_SET;
+
+#if defined(LOCAL_PEERPID)
+    if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &so_len) != 0) {
+        ErrorF("getsockopt failed to determine pid of socket %d: %s\n", fd, strerror(errno));
+    } else {
+        lcc->pid = pid;
+        lcc->fieldsSet |= LCC_PID_SET;
+    }
+#endif
+
     return 0;
 #endif
 #else

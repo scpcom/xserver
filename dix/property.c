@@ -205,7 +205,8 @@ ProcChangeProperty(ClientPtr client)
     WindowPtr pWin;
     char format, mode;
     unsigned long len;
-    int sizeInBytes, totalSize, err;
+    int sizeInBytes, err;
+    uint64_t totalSize;
 
     REQUEST(xChangePropertyReq);
 
@@ -253,7 +254,7 @@ ProcChangeProperty(ClientPtr client)
 int
 dixChangeWindowProperty(ClientPtr pClient, WindowPtr pWin, Atom property,
                         Atom type, int format, int mode, unsigned long len,
-                        void *value, Bool sendevent)
+                        const void *value, Bool sendevent)
 {
     PropertyPtr pProp;
     PropertyRec savedProp;
