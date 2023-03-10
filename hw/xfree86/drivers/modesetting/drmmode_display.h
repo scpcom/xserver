@@ -250,6 +250,9 @@ typedef struct {
     Bool enable_flipping;
     Bool flipping_active;
     Bool is_scale;
+
+    Bool vrr_enabled;
+    Bool use_gamma_lut;
 } drmmode_crtc_private_rec, *drmmode_crtc_private_ptr;
 
 typedef struct {
@@ -278,6 +281,8 @@ typedef struct {
 
     xf86OutputStatus status;
 
+    Atom ctm_atom;
+    struct drm_color_ctm ctm;
 } drmmode_output_private_rec, *drmmode_output_private_ptr;
 
 typedef struct {
@@ -320,7 +325,7 @@ int drmmode_bo_destroy(drmmode_ptr drmmode, drmmode_bo *bo);
 uint32_t drmmode_bo_get_pitch(drmmode_bo *bo);
 uint32_t drmmode_bo_get_handle(drmmode_bo *bo);
 Bool drmmode_handle_new_screen_pixmap(drmmode_ptr drmmode);
-void *drmmode_map_slave_bo(drmmode_ptr drmmode, msPixmapPrivPtr ppriv);
+void *drmmode_map_secondary_bo(drmmode_ptr drmmode, msPixmapPrivPtr ppriv);
 Bool drmmode_SetSlaveBO(PixmapPtr ppix,
                         drmmode_ptr drmmode,
                         int fd_handle, int pitch, int size);

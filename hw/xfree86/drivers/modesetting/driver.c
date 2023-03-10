@@ -97,6 +97,14 @@ ms_back_pixmap_from_fd(PixmapPtr pixmap,
                        CARD16 height,
                        CARD16 stride, CARD8 depth, CARD8 bpp);
 
+/* window wrapper functions used to get the notification when
+ * the window property changes */
+static Atom vrr_atom;
+static Bool property_vectors_wrapped;
+static Bool restore_property_vector;
+static int (*saved_change_property) (ClientPtr client);
+static int (*saved_delete_property) (ClientPtr client);
+
 #ifdef XSERVER_LIBPCIACCESS
 static const struct pci_id_match ms_device_match[] = {
     {
@@ -148,6 +156,9 @@ static const OptionInfoRec Options[] = {
     {OPTION_ZAPHOD_HEADS, "ZaphodHeads", OPTV_STRING, {0}, FALSE},
     {OPTION_DOUBLE_SHADOW, "DoubleShadow", OPTV_BOOLEAN, {0}, FALSE},
     {OPTION_ATOMIC, "Atomic", OPTV_BOOLEAN, {0}, FALSE},
+    {OPTION_VARIABLE_REFRESH, "VariableRefresh", OPTV_BOOLEAN, {0}, FALSE},
+    {OPTION_USE_GAMMA_LUT, "UseGammaLUT", OPTV_BOOLEAN, {0}, FALSE},
+    {OPTION_ASYNC_FLIP_SECONDARIES, "AsyncFlipSecondaries", OPTV_BOOLEAN, {0}, FALSE},
     {OPTION_FLIP_FB, "FlipFB", OPTV_STRING, {0}, FALSE},
     {OPTION_NO_EDID, "NoEDID", OPTV_BOOLEAN, {0}, FALSE},
     {OPTION_HOTPLUG_RESET, "HotplugReset", OPTV_BOOLEAN, {0}, TRUE},
@@ -714,7 +725,7 @@ msBlockHandler(ScreenPtr pScreen, void *timeout)
     ms->BlockHandler = pScreen->BlockHandler;
     pScreen->BlockHandler = msBlockHandler;
     if (pScreen->isGPU && !ms->drmmode.reverse_prime_offload_mode)
-        dispatch_slave_dirty(pScreen);
+        dispatch_secondary_dirty(pScreen);
     else {
         if (ms->dirty_enabled)
             dispatch_dirty(pScreen);

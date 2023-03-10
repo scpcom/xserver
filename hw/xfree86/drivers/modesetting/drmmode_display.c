@@ -2569,6 +2569,7 @@ drmmode_crtc_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_res
     drmmode_crtc_private_ptr drmmode_crtc;
     xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(pScrn);
     modesettingEntPtr ms_ent = ms_ent_priv(pScrn);
+    modesettingPtr ms = modesettingPTR(pScrn);
     drmModeObjectPropertiesPtr props;
     static const drmmode_prop_info_rec crtc_props[] = {
         [DRMMODE_CRTC_ACTIVE] = { .name = "ACTIVE" },
@@ -5055,7 +5056,8 @@ drmmode_flip_fb(xf86CrtcPtr crtc, int *timeout)
     fb = &drmmode_crtc->flip_fb[drmmode_crtc->current_fb];
     if (!ms_do_pageflip_bo(screen, &fb->bo, drmmode_crtc,
                            drmmode_crtc->vblank_pipe, TRUE,
-                           drmmode_flip_fb_handler, drmmode_flip_fb_abort))
+                           drmmode_flip_fb_handler, drmmode_flip_fb_abort,
+                           "FB-flip"))
         return FALSE;
 
     drmmode_crtc->flipping = TRUE;

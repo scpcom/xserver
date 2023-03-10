@@ -59,6 +59,9 @@ typedef enum {
     OPTION_ZAPHOD_HEADS,
     OPTION_DOUBLE_SHADOW,
     OPTION_ATOMIC,
+    OPTION_VARIABLE_REFRESH,
+    OPTION_USE_GAMMA_LUT,
+    OPTION_ASYNC_FLIP_SECONDARIES,
     OPTION_FLIP_FB,
     OPTION_NO_EDID,
     OPTION_HOTPLUG_RESET,
@@ -134,6 +137,51 @@ typedef struct _modesettingRec {
     Bool kms_has_modifiers;
 
     XF86VideoAdaptorPtr adaptor;
+
+    /* VRR support */
+    Bool vrr_support;
+    WindowPtr flip_window;
+
+    Bool is_connector_vrr_capable;
+    uint32_t connector_prop_id;
+
+    /* shadow API */
+    struct {
+        Bool (*Setup)(ScreenPtr);
+        Bool (*Add)(ScreenPtr, PixmapPtr, ShadowUpdateProc, ShadowWindowProc,
+                    int, void *);
+        void (*Remove)(ScreenPtr, PixmapPtr);
+        void (*Update32to24)(ScreenPtr, shadowBufPtr);
+        void (*UpdatePacked)(ScreenPtr, shadowBufPtr);
+    } shadow;
+
+#ifdef GLAMOR_HAS_GBM
+    /* glamor API */
+    struct {
+        Bool (*back_pixmap_from_fd)(PixmapPtr, int, CARD16, CARD16, CARD16,
+                                    CARD8, CARD8);
+        void (*block_handler)(ScreenPtr);
+        void (*clear_pixmap)(PixmapPtr);
+        Bool (*egl_create_textured_pixmap)(PixmapPtr, int, int);
+        Bool (*egl_create_textured_pixmap_from_gbm_bo)(PixmapPtr,
+                                                       struct gbm_bo *,
+                                                       Bool);
+        void (*egl_exchange_buffers)(PixmapPtr, PixmapPtr);
+        struct gbm_device *(*egl_get_gbm_device)(ScreenPtr);
+        Bool (*egl_init)(ScrnInfoPtr, int);
+        void (*finish)(ScreenPtr);
+        struct gbm_bo *(*gbm_bo_from_pixmap)(ScreenPtr, PixmapPtr);
+        Bool (*init)(ScreenPtr, unsigned int);
+        int (*name_from_pixmap)(PixmapPtr, CARD16 *, CARD32 *);
+        void (*set_drawable_modifiers_func)(ScreenPtr,
+                                            GetDrawableModifiersFuncPtr);
+        int (*shareable_fd_from_pixmap)(ScreenPtr, PixmapPtr, CARD16 *,
+                                        CARD32 *);
+        Bool (*supports_pixmap_import_export)(ScreenPtr);
+        XF86VideoAdaptorPtr (*xv_init)(ScreenPtr, int);
+        const char *(*egl_get_driver_name)(ScreenPtr);
+    } glamor;
+#endif
 } modesettingRec, *modesettingPtr;
 
 #define glamor_finish(screen) ms->glamor.finish(screen)
@@ -191,7 +239,8 @@ Bool ms_do_pageflip_bo(ScreenPtr screen,
                        int ref_crtc_vblank_pipe,
                        Bool async,
                        ms_pageflip_handler_proc pageflip_handler,
-                       ms_pageflip_abort_proc pageflip_abort);
+                       ms_pageflip_abort_proc pageflip_abort,
+                       const char *log_prefix);
 
 Bool ms_do_pageflip(ScreenPtr screen,
                     PixmapPtr new_front,
@@ -230,3 +279,5 @@ Bool ms_exa_dri3_init(ScreenPtr screen);
 
 void ms_exchange_buffers(PixmapPtr front, PixmapPtr back);
 int ms_name_from_pixmap(PixmapPtr pixmap, CARD16 *stride, CARD32 *size);
+Bool ms_window_has_variable_refresh(modesettingPtr ms, WindowPtr win);
+void ms_present_set_screen_vrr(ScrnInfoPtr scrn, Bool vrr_enabled);

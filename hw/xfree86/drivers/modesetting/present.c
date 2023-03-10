@@ -374,7 +374,8 @@ ms_present_flip(RRCrtcPtr crtc,
     }
 
     ret = ms_do_pageflip(screen, pixmap, event, drmmode_crtc->vblank_pipe, !sync_flip,
-                         ms_present_flip_handler, ms_present_flip_abort);
+                         ms_present_flip_handler, ms_present_flip_abort,
+                         "Present-flip");
     if (!ret) {
         xf86DrvMsg(scrn->scrnIndex, X_ERROR, "present flip failed\n");
     } else {

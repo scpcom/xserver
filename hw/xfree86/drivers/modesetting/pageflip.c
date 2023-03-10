@@ -187,6 +187,7 @@ queue_flip_on_crtc(ScreenPtr screen, xf86CrtcPtr crtc,
     drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
     struct ms_crtc_pageflip *flip;
     uint32_t seq;
+    int err;
 
     flip = calloc(1, sizeof(struct ms_crtc_pageflip));
     if (flip == NULL) {
@@ -324,7 +325,8 @@ ms_do_pageflip_bo(ScreenPtr screen,
                   int ref_crtc_vblank_pipe,
                   Bool async,
                   ms_pageflip_handler_proc pageflip_handler,
-                  ms_pageflip_abort_proc pageflip_abort)
+                  ms_pageflip_abort_proc pageflip_abort,
+                  const char *log_prefix)
 {
     ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
     modesettingPtr ms = modesettingPTR(scrn);
@@ -368,11 +370,6 @@ ms_do_pageflip_bo(ScreenPtr screen,
     if (drmmode_bo_import(&ms->drmmode, new_front_bo,
                           flipdata->fb_id))
         goto error_out;
-    } else {
-        if (ms->drmmode.flip_bo_import_failed &&
-            new_front != screen->GetScreenPixmap(screen))
-            ms->drmmode.flip_bo_import_failed = FALSE;
-    }
 
     /* Queue flips on all enabled CRTCs.
      *
@@ -384,9 +381,9 @@ ms_do_pageflip_bo(ScreenPtr screen,
      * may never complete; this is a configuration error.
      */
     for (i = 0; i < config->num_crtc; i++) {
-        enum queue_flip_status flip_status;
+        //enum queue_flip_status flip_status;
         xf86CrtcPtr crtc = config->crtc[i];
-        drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
+        //drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
 
         if (!xf86_crtc_on(crtc))
             continue;
@@ -446,7 +443,8 @@ ms_do_pageflip(ScreenPtr screen,
                int ref_crtc_vblank_pipe,
                Bool async,
                ms_pageflip_handler_proc pageflip_handler,
-               ms_pageflip_abort_proc pageflip_abort)
+               ms_pageflip_abort_proc pageflip_abort,
+               const char *log_prefix)
 {
     ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
     modesettingPtr ms = modesettingPTR(scrn);
@@ -481,7 +479,18 @@ ms_do_pageflip(ScreenPtr screen,
 
     ret = ms_do_pageflip_bo(screen, &new_front_bo, event,
                             ref_crtc_vblank_pipe, async,
-                            pageflip_handler, pageflip_abort);
+                            pageflip_handler, pageflip_abort, log_prefix);
+    if (ret == FALSE) {
+        if (!ms->drmmode.flip_bo_import_failed) {
+            xf86DrvMsg(scrn->scrnIndex, X_WARNING, "%s: Import BO failed: %s\n",
+                       log_prefix, strerror(errno));
+            ms->drmmode.flip_bo_import_failed = TRUE;
+        }
+    } else {
+        if (ms->drmmode.flip_bo_import_failed &&
+            new_front != screen->GetScreenPixmap(screen))
+            ms->drmmode.flip_bo_import_failed = FALSE;
+    }
 
 #ifdef GLAMOR_HAS_GBM
     new_front_bo.gbm = NULL;
