@@ -5,16 +5,5 @@
 05_Revert-Unload-submodules.diff
 06_use-intel-only-on-pre-gen4.diff
 07_use-modesetting-driver-by-default-on-GeForce.diff
-08_xkb-switch-to-array-index-loops-to-moving-pointers.patch
-09_xkb-add-request-length-validation-for-XkbSetGeometry.patch
-10_xkb-swap-XkbSetDeviceInfo-and-XkbSetDeviceInfoCheck.patch
-11_xkb-proof-GetCountedString-against-request-length-at.patch
-12_xkb-fix-some-possible-memleaks-in-XkbGetKbdByName.patch
-13_Xtest-disallow-GenericEvents-in-XTestSwapFakeInput.patch
-14_Xi-disallow-passive-grabs-with-a-detail-255.patch
-15_Xext-free-the-XvRTVideoNotify-when-turning-off-from-.patch
-16_Xext-free-the-screen-saver-resource-when-replacing-i.patch
-17_Xi-return-an-error-from-XI-property-changes-if-verif.patch
-18_Xi-avoid-integer-truncation-in-length-check-of-ProcX.patch
-19_xkb-reset-the-radio_groups-pointer-to-NULL-after-fre.patch
+present-Check-for-NULL-to-prevent-crash.patch
 configure-disable-gbm_bo_with_modifiers.patch
