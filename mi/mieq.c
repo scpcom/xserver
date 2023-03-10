@@ -702,5 +702,21 @@ mieqProcessInputEvents(void)
     // prevent busy retrying cached motion
     SetInputCheck(&miEventQueue.head, &miEventQueue.head);
 
+    CallCallbacks(&miCallbacksWhenDrained, NULL);
+
+    input_unlock();
+}
+
+void mieqAddCallbackOnDrained(CallbackProcPtr callback, void *param)
+{
+    input_lock();
+    AddCallback(&miCallbacksWhenDrained, callback, param);
+    input_unlock();
+}
+
+void mieqRemoveCallbackOnDrained(CallbackProcPtr callback, void *param)
+{
+    input_lock();
+    DeleteCallback(&miCallbacksWhenDrained, callback, param);
     input_unlock();
 }
