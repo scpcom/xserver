@@ -2625,11 +2625,6 @@ drmmode_crtc_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, drmModeResPtr mode_res
         drmmode_crtc_create_planes(crtc, num);
     }
 
-    drmmode_prop_info_update(drmmode, drmmode_crtc->props,
-                             DRMMODE_CRTC__COUNT, props);
-    drmModeFreeObjectProperties(props);
-    drmmode_crtc_create_planes(crtc, num);
-
     /* Hide any cursors which may be active from previous users */
     drmModeSetCursor(drmmode->fd, drmmode_crtc->mode_crtc->crtc_id, 0, 0, 0);
 
