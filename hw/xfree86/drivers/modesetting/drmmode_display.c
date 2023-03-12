@@ -4801,6 +4801,7 @@ drmmode_apply_transform(xf86CrtcPtr crtc)
     else
         drmmode_crtc->is_scale = TRUE;
 
+#if 0
     /* fb flipping disabled or doing shared pixmap flipping */
     if (!drmmode_crtc->can_flip_fb || drmmode_crtc->enable_flipping)
         goto bail;
@@ -4828,6 +4829,7 @@ drmmode_apply_transform(xf86CrtcPtr crtc)
 
 fail:
     drmmode_crtc->can_flip_fb = FALSE;
+#endif
 
 bail:
     drmmode_destroy_flip_fb(crtc);
