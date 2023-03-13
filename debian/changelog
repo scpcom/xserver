@@ -1,3 +1,9 @@
+xorg-server (2:21.1.7-1+rockchip5) UNRELEASED; urgency=medium
+
+  * Release to jammy
+
+ -- builder <builder@host.local>  Sun, 12 Mar 2023 21:20:22 +0100
+
 xorg-server (2:21.1.7-1) unstable; urgency=medium
 
   * New upstream release
