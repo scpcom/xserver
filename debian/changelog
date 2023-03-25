@@ -1,8 +1,8 @@
-xorg-server (2:21.1.7-1+rockchip5) UNRELEASED; urgency=medium
+xorg-server (2:21.1.7-1+rockchip6) UNRELEASED; urgency=medium
 
   * Release to jammy
 
- -- builder <builder@host.local>  Sun, 12 Mar 2023 21:20:22 +0100
+ -- builder <scsupport@xutc-001e0665f46c>  Sat, 25 Mar 2023 19:06:51 +0100
 
 xorg-server (2:21.1.7-1) unstable; urgency=medium
 
