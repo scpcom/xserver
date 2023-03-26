@@ -580,8 +580,6 @@ void glamor_pixmap_clear_fbo(glamor_screen_private *glamor_priv, glamor_pixmap_f
 
 const struct glamor_format *glamor_format_for_pixmap(PixmapPtr pixmap);
 
-const struct glamor_format *glamor_format_for_pixmap(PixmapPtr pixmap);
-
 /* Return whether 'picture' is alpha-only */
 static inline Bool glamor_picture_is_alpha(PicturePtr picture)
 {
