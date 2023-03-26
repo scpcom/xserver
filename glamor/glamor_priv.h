@@ -45,8 +45,14 @@
 #endif
 
 #ifdef GLES_USE_HIGHP
-#define GLAMOR_DEFAULT_PRECISION \
-    "precision highp float;\n"
+#define GLAMOR_DEFAULT_PRECISION            \
+    "#ifdef GL_ES\n"                        \
+    "#  ifdef GL_FRAGMENT_PRECISION_HIGH\n" \
+    "     precision highp float;\n"         \
+    "#  else\n"                             \
+    "     precision mediump float;\n"       \
+    "#  endif\n"                            \
+    "#endif\n"
 #else
 #define GLAMOR_DEFAULT_PRECISION  \
     "#ifdef GL_ES\n"              \

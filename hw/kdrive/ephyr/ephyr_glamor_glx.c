@@ -155,7 +155,11 @@ ephyr_glamor_setup_texturing_shader(struct ephyr_glamor *glamor)
     const char *fs_source =
         "#ifdef GL_ES\n"
 #ifdef GLES_USE_HIGHP
-        "precision highp float;\n"
+        "#  ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+        "     precision highp float;\n"
+        "#  else\n"
+        "     precision mediump float;\n"
+        "#  endif\n"
 #else
         "precision mediump float;\n"
 #endif
