@@ -202,6 +202,7 @@ static const char fs_template[] =
     "%s"                                /* version */
     "%s"                                /* prim extensions */
     "%s"                                /* fill extensions */
+    "%s"                                /* exts */
     GLAMOR_DEFAULT_PRECISION
     "%s"                                /* defines */
     "%s"                                /* prim fs_vars */
@@ -291,7 +292,7 @@ glamor_build_program(ScreenPtr          screen,
     if (!fs_vars)
         goto fail;
 
-    if (version && !glamor_priv->is_gles) {
+    if (version) {
         if (asprintf(&version_string, "#version %d\n", version) < 0)
             version_string = NULL;
         if (!version_string)
@@ -315,6 +316,7 @@ glamor_build_program(ScreenPtr          screen,
                  str(version_string),
                  str(prim->fs_extensions),
                  str(fill->fs_extensions),
+                 gpu_shader4 ? "#extension GL_EXT_gpu_shader4 : require\n#define texelFetch texelFetch2D\n#define uint unsigned int\n" : "",
                  str(defines),
                  str(prim->fs_vars),
                  str(fill->fs_vars),
